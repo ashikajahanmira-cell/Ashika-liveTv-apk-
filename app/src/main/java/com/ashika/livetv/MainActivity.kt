@@ -137,11 +137,13 @@ class MainActivity : Activity() {
                 setPadding(18, 20, 18, 20)
                 setBackgroundColor(Color.rgb(18, 27, 45))
                 setOnClickListener {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Selected: ${channel.first}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    val intent = android.content.Intent(
+    this@MainActivity,
+    PlayerActivity::class.java
+)
+intent.putExtra("url", channel.second)
+intent.putExtra("name", channel.first)
+startActivity(intent)
                 }
             }
 
