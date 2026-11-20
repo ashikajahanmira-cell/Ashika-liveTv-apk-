@@ -9,25 +9,28 @@ import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.content.Intent
+import android.content.SharedPreferences
+import android.speech.RecognizerIntent
 import android.widget.*
 import android.text.TextWatcher
 import android.text.Editable
-import android.content.Intent
-import android.content.SharedPreferences
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
 
-    private val bg = Color.rgb(7, 12, 25)
-    private val panel = Color.rgb(16, 27, 47)
-    private val blue = Color.rgb(38, 112, 255)
-    private val red = Color.rgb(245, 65, 85)
+    private val bg = Color.rgb(8, 5, 20)
+    private val panel = Color.rgb(25, 15, 45)
+    private val purple = Color.rgb(151, 71, 255)
+    private val purpleLight = Color.rgb(190, 130, 255)
     private val white = Color.WHITE
-    private val muted = Color.rgb(155, 170, 195)
+    private val muted = Color.rgb(175, 160, 200)
+    private val red = Color.rgb(255, 75, 120)
 
     private lateinit var prefs: SharedPreferences
     private lateinit var root: LinearLayout
@@ -55,7 +58,6 @@ class MainActivity : Activity() {
     private var selectedCategory = "All"
     private var page = "home"
     private var query = ""
-
     private var playlistRequestId = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,15 +77,26 @@ class MainActivity : Activity() {
 
         buildHome()
         loadChannels()
+
+        if (prefs.getBoolean("pin_enabled", false)) {
+            showAppLock()
+        }
     }
 
     private fun dp(v: Int): Int =
         (v * resources.displayMetrics.density).toInt()
 
-    private fun rounded(color: Int, radius: Int = 16): GradientDrawable {
+    private fun rounded(
+        color: Int,
+        radius: Int = 16,
+        stroke: Int = 0
+    ): GradientDrawable {
         return GradientDrawable().apply {
             setColor(color)
             cornerRadius = dp(radius).toFloat()
+            if (stroke != 0) {
+                setStroke(dp(1), stroke)
+            }
         }
     }
 
@@ -105,22 +118,25 @@ class MainActivity : Activity() {
         text: String,
         action: () -> Unit
     ): TextView {
-        return label(text, 15f, white, true).apply {
+        return label(text, 14f, white, true).apply {
             gravity = Gravity.CENTER
             setPadding(dp(15), dp(12), dp(15), dp(12))
-            background = rounded(blue, 14)
+            background = rounded(purple, 15)
             setOnClickListener { action() }
         }
     }
 
+    // HOME UI
+
     private fun buildHome() {
+
         val outer = FrameLayout(this).apply {
             setBackgroundColor(bg)
         }
 
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(12), dp(18), dp(8))
+            setPadding(dp(17), dp(12), dp(17), dp(8))
         }
 
         val header = LinearLayout(this).apply {
@@ -138,47 +154,49 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
 
-        brand.addView(label("ASHIKA", 23f, white, true))
-        brand.addView(label("LIVE TELEVISION", 9f, muted, true))
+        brand.addView(label("ASHIKA", 24f, purpleLight, true))
+        brand.addView(label("LIVE TELEVISION • PREMIUM", 9f, muted, true))
 
-        val live = label("● LIVE", 12f, Color.rgb(255, 90, 105), true)
+        val live = label("● LIVE", 12f, Color.rgb(255, 75, 120), true)
             .apply {
-                setPadding(dp(10), dp(8), dp(10), dp(8))
-                background = rounded(0x332F5BFF, 20)
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                background = rounded(panel, 20, purple)
             }
 
         header.addView(menu)
         header.addView(brand)
         header.addView(live)
-
         root.addView(header)
 
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(22), dp(20), dp(20))
+            setPadding(dp(20), dp(23), dp(20), dp(20))
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(
-                    Color.rgb(25, 77, 160),
-                    Color.rgb(13, 35, 76),
-                    Color.rgb(29, 20, 57)
+                    Color.rgb(95, 28, 175),
+                    Color.rgb(44, 15, 85),
+                    Color.rgb(15, 8, 35)
                 )
-            ).apply { cornerRadius = dp(22).toFloat() }
+            ).apply {
+                cornerRadius = dp(23).toFloat()
+                setStroke(dp(1), purple)
+            }
         }
 
-        hero.addView(label("WELCOME TO", 11f, 0xFFBFD6FF.toInt(), true))
+        hero.addView(label("WELCOME TO PREMIUM ENTERTAINMENT", 10f, purpleLight, true))
 
         hero.addView(
-            label("ASHIKA LIVE TV", 25f, white, true).apply {
-                setPadding(0, dp(7), 0, dp(5))
+            label("ASHIKA LIVE TV", 27f, white, true).apply {
+                setPadding(0, dp(8), 0, dp(5))
             }
         )
 
         hero.addView(
-            label("Your entertainment. One destination.", 12f, 0xFFD4E2FF.toInt())
+            label("Your entertainment. One destination.", 12f, muted)
         )
 
-        val heroButton = button("▶   Explore Channels") {
+        val explore = button("▶   EXPLORE CHANNELS") {
             page = "home"
             selectedCategory = "All"
             renderCategories()
@@ -187,11 +205,11 @@ class MainActivity : Activity() {
 
         val heroParams = LinearLayout.LayoutParams(-2, -2)
         heroParams.topMargin = dp(17)
-        hero.addView(heroButton, heroParams)
+        hero.addView(explore, heroParams)
 
-        val heroParamsOuter = LinearLayout.LayoutParams(-1, -2)
-        heroParamsOuter.topMargin = dp(18)
-        root.addView(hero, heroParamsOuter)
+        val heroOuter = LinearLayout.LayoutParams(-1, -2)
+        heroOuter.topMargin = dp(18)
+        root.addView(hero, heroOuter)
 
         val section = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -204,26 +222,42 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, -2, 1f)
         )
 
-        val refresh = label("↻ Refresh", 13f, 0xFF82B5FF.toInt(), true)
-
-        refresh.setOnClickListener {
-            loadChannels()
-        }
-
+        val refresh = label("↻ Refresh", 13f, purpleLight, true)
+        refresh.setOnClickListener { loadChannels() }
         section.addView(refresh)
         root.addView(section)
 
+        // SEARCH + VOICE SEARCH
+
+        val searchRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
         search = EditText(this).apply {
-            hint = "⌕   Search channels..."
+            hint = "⌕  Search channels..."
             textSize = 14f
             setSingleLine(true)
             setTextColor(white)
             setHintTextColor(muted)
-            setPadding(dp(15), dp(12), dp(15), dp(12))
-            background = rounded(panel, 14)
+            setPadding(dp(14), dp(12), dp(10), dp(12))
+            background = rounded(panel, 14, purple)
         }
 
-        root.addView(search)
+        searchRow.addView(
+            search,
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+
+        val mic = button("🎤") {
+            startVoiceSearch()
+        }
+
+        val micParams = LinearLayout.LayoutParams(dp(52), dp(48))
+        micParams.marginStart = dp(8)
+        searchRow.addView(mic, micParams)
+
+        root.addView(searchRow)
 
         categoryList = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -254,12 +288,61 @@ class MainActivity : Activity() {
         scroll.addView(channelList)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
+        // BOTTOM NAVIGATION
+
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(5))
+            background = rounded(panel, 18, purple)
+        }
+
+        val navItems = listOf(
+            "⌂\nHome",
+            "♥\nFavorites",
+            "◷\nHistory",
+            "⚙\nSettings"
+        )
+
+        navItems.forEachIndexed { index, title ->
+            val item = label(title, 12f, purpleLight, true).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(5), dp(5), dp(5), dp(5))
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+
+                setOnClickListener {
+                    when (index) {
+                        0 -> {
+                            page = "home"
+                            selectedCategory = "All"
+                            renderCategories()
+                            renderChannels()
+                        }
+                        1 -> {
+                            page = "favorites"
+                            renderChannels()
+                        }
+                        2 -> {
+                            page = "history"
+                            renderChannels()
+                        }
+                        3 -> showSettings()
+                    }
+                }
+            }
+            bottom.addView(item)
+        }
+
+        val bottomParams = LinearLayout.LayoutParams(-1, -2)
+        bottomParams.topMargin = dp(8)
+        root.addView(bottom, bottomParams)
+
         outer.addView(root)
 
         drawer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(28), dp(18), dp(20))
-            background = rounded(Color.rgb(13, 24, 44), 0)
+            background = rounded(Color.rgb(18, 9, 35), 0, purple)
             elevation = dp(20).toFloat()
             visibility = View.GONE
         }
@@ -291,13 +374,64 @@ class MainActivity : Activity() {
 
             override fun afterTextChanged(s: Editable?) {}
         })
+
+        renderCategories()
+        renderChannels()
     }
+
+    // VOICE SEARCH
+
+    private fun startVoiceSearch() {
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            intent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+            )
+            intent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE,
+                Locale.getDefault()
+            )
+            intent.putExtra(
+                RecognizerIntent.EXTRA_PROMPT,
+                "Say a channel name"
+            )
+            startActivityForResult(intent, 501)
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "Voice search is not available",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    @Deprecated("Legacy activity result API")
+    override fun onActivityResult(
+        requestCode: Int,
+        resultCode: Int,
+        data: Intent?
+    ) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == 501 && resultCode == RESULT_OK) {
+            val results = data?.getStringArrayListExtra(
+                RecognizerIntent.EXTRA_RESULTS
+            )
+
+            val spoken = results?.firstOrNull().orEmpty()
+            search.setText(spoken)
+            search.setSelection(search.text.length)
+        }
+    }
+
+    // DRAWER
 
     private fun showDrawer() {
         drawer.removeAllViews()
 
-        drawer.addView(label("ASHIKA", 25f, white, true))
-        drawer.addView(label("PREMIUM LIVE TV", 10f, muted, true))
+        drawer.addView(label("ASHIKA", 25f, purpleLight, true))
+        drawer.addView(label("NEON PURPLE PREMIUM", 10f, muted, true))
 
         addDrawerItem("🏠   Home") {
             page = "home"
@@ -323,26 +457,30 @@ class MainActivity : Activity() {
             renderChannels()
         }
 
+        addDrawerItem("🔐   PIN Lock Settings") {
+            showPinSettings()
+        }
+
+        addDrawerItem("🛠   Admin Panel") {
+            showAdminPanel()
+        }
+
         addDrawerItem("🔄   Refresh Channels") {
             loadChannels()
         }
 
         addDrawerItem("⚙️   Settings") {
-            AlertDialog.Builder(this)
-                .setTitle("Ashika Live TV Settings")
-                .setMessage(
-                    "Premium Dark Theme\n" +
-                    "Source: Firebase + Multiple M3U Playlists\n" +
-                    "Channels: ${channels.size}"
-                )
-                .setPositiveButton("OK", null)
-                .show()
+            showSettings()
         }
 
         addDrawerItem("ℹ️   About") {
             AlertDialog.Builder(this)
                 .setTitle("Ashika Live TV")
-                .setMessage("Your personal entertainment destination.")
+                .setMessage(
+                    "Neon Purple Premium Edition\n" +
+                    "Firebase + Multiple M3U Playlists\n" +
+                    "Channels: ${channels.size}"
+                )
                 .setPositiveButton("OK", null)
                 .show()
         }
@@ -364,17 +502,249 @@ class MainActivity : Activity() {
 
         drawer.addView(item)
 
-        val line = View(this).apply {
-            setBackgroundColor(0xFF25344D.toInt())
-        }
-
         drawer.addView(
-            line,
+            View(this).apply {
+                setBackgroundColor(0xFF392052.toInt())
+            },
             LinearLayout.LayoutParams(-1, dp(1))
         )
     }
 
-    // FIREBASE CHANNELS + MULTIPLE PLAYLISTS
+    // SETTINGS
+
+    private fun showSettings() {
+        AlertDialog.Builder(this)
+            .setTitle("Ashika Premium Settings")
+            .setMessage(
+                "Theme: Neon Purple\n" +
+                "Channels: ${channels.size}\n" +
+                "Favorites: ${favorites.size}\n" +
+                "PIN Lock: ${if (prefs.getBoolean("pin_enabled", false)) "ON" else "OFF"}\n\n" +
+                "Player and Picture-in-Picture settings will be configured in PlayerActivity."
+            )
+            .setPositiveButton("PIN Settings") { _, _ ->
+                showPinSettings()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    // PIN SETTINGS
+
+    private fun showPinSettings() {
+        val input = EditText(this).apply {
+            hint = "Enter new 4-8 digit PIN"
+            inputType = 2
+            setTextColor(white)
+            setHintTextColor(muted)
+        }
+
+        val box = LinearLayout(this).apply {
+            setPadding(dp(22), dp(10), dp(22), dp(5))
+            addView(input)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Set App PIN")
+            .setMessage("Create a PIN for app lock and Admin Panel.")
+            .setView(box)
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val pin = input.text.toString()
+
+                if (!pin.matches(Regex("\\d{4,8}"))) {
+                    input.error = "Enter 4 to 8 digits"
+                    return@setOnClickListener
+                }
+
+                prefs.edit()
+                    .putString("app_pin", pin)
+                    .putBoolean("pin_enabled", true)
+                    .apply()
+
+                Toast.makeText(this, "PIN lock enabled", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun showAppLock() {
+        val input = EditText(this).apply {
+            hint = "Enter your PIN"
+            inputType = 2
+            setTextColor(white)
+            setHintTextColor(muted)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("🔐 Ashika App Lock")
+            .setMessage("Enter your PIN to continue.")
+            .setView(input)
+            .setCancelable(false)
+            .setPositiveButton("Unlock", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val savedPin = prefs.getString("app_pin", "")
+                if (input.text.toString() == savedPin) {
+                    dialog.dismiss()
+                } else {
+                    input.error = "Incorrect PIN"
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+    // ADMIN PANEL
+
+    private fun showAdminPanel() {
+        val savedPin = prefs.getString("app_pin", null)
+
+        if (savedPin.isNullOrBlank()) {
+            AlertDialog.Builder(this)
+                .setTitle("Admin Panel Locked")
+                .setMessage("Set an app PIN before opening the Admin Panel.")
+                .setPositiveButton("Set PIN") { _, _ ->
+                    showPinSettings()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+
+        val input = EditText(this).apply {
+            hint = "Admin PIN"
+            inputType = 2
+            setTextColor(white)
+            setHintTextColor(muted)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Admin Authentication")
+            .setMessage("Enter your app PIN.")
+            .setView(input)
+            .setPositiveButton("Continue") { _, _ ->
+                if (input.text.toString() == savedPin) {
+                    openAdminOptions()
+                } else {
+                    Toast.makeText(
+                        this,
+                        "Incorrect PIN",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun openAdminOptions() {
+        val options = arrayOf(
+            "Add Channel",
+            "Refresh Channels",
+            "View Channel Count"
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("ASHIKA ADMIN PANEL")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> addAdminChannel()
+                    1 -> loadChannels()
+                    2 -> AlertDialog.Builder(this)
+                        .setMessage("Total channels: ${channels.size}")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
+            }
+            .show()
+    }
+
+    private fun addAdminChannel() {
+        val name = EditText(this).apply {
+            hint = "Channel name"
+            setTextColor(white)
+        }
+
+        val url = EditText(this).apply {
+            hint = "Stream URL"
+            setTextColor(white)
+        }
+
+        val category = EditText(this).apply {
+            hint = "Category (Bangla, Hindi...)"
+            setTextColor(white)
+        }
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(5), dp(20), dp(5))
+            addView(name)
+            addView(url)
+            addView(category)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Add New Channel")
+            .setView(box)
+            .setPositiveButton("Save") { _, _ ->
+                val channelName = name.text.toString().trim()
+                val streamUrl = url.text.toString().trim()
+                val channelCategory =
+                    category.text.toString().trim().ifBlank { "Other" }
+
+                if (
+                    channelName.isBlank() ||
+                    !(streamUrl.startsWith("https://") ||
+                      streamUrl.startsWith("http://"))
+                ) {
+                    Toast.makeText(
+                        this,
+                        "Enter a channel name and valid HTTP(S) URL",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@setPositiveButton
+                }
+
+                FirebaseFirestore.getInstance()
+                    .collection("channels")
+                    .add(
+                        hashMapOf(
+                            "name" to channelName,
+                            "url" to streamUrl,
+                            "category" to channelCategory,
+                            "enabled" to true
+                        )
+                    )
+                    .addOnSuccessListener {
+                        Toast.makeText(
+                            this,
+                            "Channel added successfully",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    .addOnFailureListener {
+                        Toast.makeText(
+                            this,
+                            "Firebase error: ${it.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // FIREBASE + PLAYLISTS
 
     private fun loadChannels() {
         channelsListener?.remove()
@@ -382,14 +752,11 @@ class MainActivity : Activity() {
 
         channelsListener = null
         playlistListener = null
-
         playlistRequestId++
 
         status.text = "Connecting to Firebase..."
 
         val db = FirebaseFirestore.getInstance()
-
-        // MANUAL CHANNELS
 
         channelsListener = db.collection("channels")
             .whereEqualTo("enabled", true)
@@ -405,22 +772,17 @@ class MainActivity : Activity() {
                 manualChannels.clear()
 
                 snapshot.documents.forEach { doc ->
-
                     val name = doc.getString("name")
                     val url = doc.getString("url")
                     val category = doc.getString("category") ?: "Other"
 
                     if (!name.isNullOrBlank() && !url.isNullOrBlank()) {
-                        manualChannels.add(
-                            Triple(name, url, category)
-                        )
+                        manualChannels.add(Triple(name, url, category))
                     }
                 }
 
                 updateCombinedChannels()
             }
-
-        // MULTIPLE PLAYLISTS
 
         playlistListener = db.collection("settings")
             .document("playlist")
@@ -438,73 +800,45 @@ class MainActivity : Activity() {
                     return@addSnapshotListener
                 }
 
-                val playlistItems =
-                    mutableListOf<Pair<String, String>>()
+                val items = mutableListOf<Pair<String, String>>()
+                val saved = snapshot.get("playlists") as? List<*>
 
-                val savedPlaylists =
-                    snapshot.get("playlists") as? List<*>
-
-                if (savedPlaylists != null) {
-
-                    savedPlaylists.forEach { item ->
-
+                if (saved != null) {
+                    saved.forEach { item ->
                         val data = item as? Map<*, *>
                             ?: return@forEach
 
-                        val name =
-                            data["name"] as? String ?: "Playlist"
-
-                        val url =
-                            data["url"] as? String ?: ""
-
-                        val enabled =
-                            data["enabled"] == true
+                        val name = data["name"] as? String ?: "Playlist"
+                        val url = data["url"] as? String ?: ""
+                        val enabled = data["enabled"] == true
 
                         if (enabled && url.isNotBlank()) {
-                            playlistItems.add(name to url)
+                            items.add(name to url)
                         }
                     }
-
                 } else {
+                    val oldUrl = snapshot.getString("url")?.trim().orEmpty()
+                    val enabled = snapshot.getBoolean("enabled") == true
 
-                    // OLD SINGLE PLAYLIST SUPPORT
-
-                    val oldUrl =
-                        snapshot.getString("url")?.trim().orEmpty()
-
-                    val oldEnabled =
-                        snapshot.getBoolean("enabled") == true
-
-                    if (oldEnabled && oldUrl.isNotBlank()) {
-                        playlistItems.add("Old Playlist" to oldUrl)
+                    if (enabled && oldUrl.isNotBlank()) {
+                        items.add("Old Playlist" to oldUrl)
                     }
                 }
 
-                downloadMultiplePlaylists(playlistItems)
+                downloadMultiplePlaylists(items)
             }
     }
 
-    // MERGE CHANNELS WITHOUT DUPLICATES
-
     private fun updateCombinedChannels() {
+        val combined = mutableListOf<Triple<String, String, String>>()
+        val used = mutableSetOf<String>()
 
-        val combined =
-            mutableListOf<Triple<String, String, String>>()
-
-        val usedUrls = mutableSetOf<String>()
-
-        manualChannels.forEach { channel ->
-
-            if (usedUrls.add(channel.second)) {
-                combined.add(channel)
-            }
+        manualChannels.forEach {
+            if (used.add(it.second)) combined.add(it)
         }
 
-        playlistChannels.forEach { channel ->
-
-            if (usedUrls.add(channel.second)) {
-                combined.add(channel)
-            }
+        playlistChannels.forEach {
+            if (used.add(it.second)) combined.add(it)
         }
 
         channels.clear()
@@ -518,58 +852,41 @@ class MainActivity : Activity() {
         }
 
         status.text = "${channels.size} CHANNELS AVAILABLE"
-
         renderCategories()
         renderChannels()
     }
 
-    // DOWNLOAD MULTIPLE M3U PLAYLISTS
-
     private fun downloadMultiplePlaylists(
         playlistItems: List<Pair<String, String>>
     ) {
-
         playlistRequestId++
         val requestId = playlistRequestId
 
         if (playlistItems.isEmpty()) {
-
             playlistChannels.clear()
             updateCombinedChannels()
-
-            status.text = "${channels.size} CHANNELS AVAILABLE"
             return
         }
 
         playlistChannels.clear()
         updateCombinedChannels()
 
-        status.text =
-            "Downloading ${playlistItems.size} playlists..."
+        status.text = "Downloading playlists..."
 
         thread {
-
-            val allChannels =
-                mutableListOf<Triple<String, String, String>>()
-
+            val all = mutableListOf<Triple<String, String, String>>()
             val errors = mutableListOf<String>()
 
             playlistItems.forEach { playlist ->
-
-                val playlistName = playlist.first
-                val playlistUrl = playlist.second
-
                 var connection: HttpURLConnection? = null
 
                 try {
-
-                    connection = URL(playlistUrl)
+                    connection = URL(playlist.second)
                         .openConnection() as HttpURLConnection
 
                     connection.connectTimeout = 15000
                     connection.readTimeout = 20000
                     connection.requestMethod = "GET"
-
                     connection.setRequestProperty(
                         "User-Agent",
                         "AshikaLiveTV/1.0"
@@ -577,10 +894,8 @@ class MainActivity : Activity() {
 
                     connection.connect()
 
-                    val responseCode = connection.responseCode
-
-                    if (responseCode !in 200..299) {
-                        throw Exception("HTTP $responseCode")
+                    if (connection.responseCode !in 200..299) {
+                        throw Exception("HTTP ${connection.responseCode}")
                     }
 
                     val content = connection.inputStream
@@ -589,97 +904,70 @@ class MainActivity : Activity() {
 
                     val parsed = parseM3U(content)
 
-                    parsed.forEach { channel ->
+                    parsed.forEach {
+                        val cat = if (it.third == "Other") {
+                            playlist.first
+                        } else {
+                            "${playlist.first} • ${it.third}"
+                        }
 
-                        val finalCategory =
-                            if (channel.third == "Other") {
-                                playlistName
-                            } else {
-                                "$playlistName • ${channel.third}"
-                            }
-
-                        allChannels.add(
-                            Triple(
-                                channel.first,
-                                channel.second,
-                                finalCategory
-                            )
-                        )
+                        all.add(Triple(it.first, it.second, cat))
                     }
 
                     if (parsed.isEmpty()) {
-                        errors.add("$playlistName: No channels found")
+                        errors.add("${playlist.first}: Empty playlist")
                     }
 
                 } catch (e: Exception) {
-
-                    errors.add(
-                        "$playlistName: ${e.message ?: "Download failed"}"
-                    )
-
+                    errors.add("${playlist.first}: ${e.message}")
                 } finally {
                     connection?.disconnect()
                 }
             }
 
             runOnUiThread {
-
                 if (isFinishing || requestId != playlistRequestId) {
                     return@runOnUiThread
                 }
 
                 playlistChannels.clear()
-                playlistChannels.addAll(allChannels)
-
+                playlistChannels.addAll(all)
                 updateCombinedChannels()
-
-                status.text =
-                    "${channels.size} CHANNELS AVAILABLE | " +
-                    "${playlistItems.size} PLAYLISTS"
 
                 if (errors.isNotEmpty()) {
                     status.text =
-                        "${channels.size} CHANNELS | " +
-                        "${errors.size} PLAYLIST ERROR(S)"
+                        "${channels.size} CHANNELS | ${errors.size} PLAYLIST ERRORS"
                 }
             }
         }
     }
 
-    // M3U PARSER
-
     private fun parseM3U(
         content: String
     ): List<Triple<String, String, String>> {
 
-        val result =
-            mutableListOf<Triple<String, String, String>>()
-
+        val result = mutableListOf<Triple<String, String, String>>()
         var currentName = ""
         var currentCategory = "Other"
 
-        content.lineSequence().forEach { rawLine ->
-
-            val line = rawLine.trim()
+        content.lineSequence().forEach { raw ->
+            val line = raw.trim()
 
             if (line.isBlank()) return@forEach
 
-            if (line.startsWith("#EXTINF", ignoreCase = true)) {
+            if (line.startsWith("#EXTINF", true)) {
+                val comma = line.lastIndexOf(',')
 
-                val commaIndex = line.lastIndexOf(',')
-
-                val displayName = if (commaIndex >= 0) {
-                    line.substring(commaIndex + 1).trim()
-                } else {
-                    ""
-                }
+                val displayName = if (comma >= 0) {
+                    line.substring(comma + 1).trim()
+                } else ""
 
                 val tvgName = Regex(
                     """tvg-name\s*=\s*["']([^"']*)["']""",
                     RegexOption.IGNORE_CASE
                 ).find(line)?.groupValues?.get(1)
 
-                val groupTitle = Regex(
+                val group = Regex(
                     """group-title\s*=\s*["']([^"']*)["']""",
                     RegexOption.IGNORE_CASE
                 ).find(line)?.groupValues?.get(1)
@@ -688,26 +976,18 @@ class MainActivity : Activity() {
                     ?.takeIf { it.isNotBlank() }
                     ?: displayName.ifBlank { "Unknown Channel" }
 
-                currentCategory = groupTitle
+                currentCategory = group
                     ?.takeIf { it.isNotBlank() }
                     ?: "Other"
 
             } else if (
                 !line.startsWith("#") &&
-                (
-                    line.startsWith("http://", true) ||
-                    line.startsWith("https://", true)
-                )
+                (line.startsWith("http://", true) ||
+                 line.startsWith("https://", true))
             ) {
-
                 if (currentName.isNotBlank()) {
-
                     result.add(
-                        Triple(
-                            currentName,
-                            line,
-                            currentCategory
-                        )
+                        Triple(currentName, line, currentCategory)
                     )
                 }
 
@@ -719,17 +999,15 @@ class MainActivity : Activity() {
         return result
     }
 
-    // CATEGORY LIST
+    // CATEGORIES
 
     private fun renderCategories() {
-
         categoryList.removeAllViews()
 
         val categories = listOf("All") +
             channels.map { it.third }.distinct().sorted()
 
         categories.forEach { category ->
-
             val selected = selectedCategory == category
 
             val chip = label(
@@ -738,13 +1016,12 @@ class MainActivity : Activity() {
                 if (selected) white else muted,
                 true
             ).apply {
-
                 gravity = Gravity.CENTER
                 setPadding(dp(15), dp(10), dp(15), dp(10))
-
                 background = rounded(
-                    if (selected) blue else panel,
-                    20
+                    if (selected) purple else panel,
+                    20,
+                    if (selected) purpleLight else 0
                 )
 
                 setOnClickListener {
@@ -756,20 +1033,17 @@ class MainActivity : Activity() {
             }
 
             val params = LinearLayout.LayoutParams(-2, -2)
-            params.setMargins(0, 0, dp(8), 0)
-
+            params.marginEnd = dp(8)
             categoryList.addView(chip, params)
         }
     }
 
-    // CHANNEL LIST
+    // CHANNELS
 
     private fun renderChannels() {
-
         channelList.removeAllViews()
 
         val filtered = when (page) {
-
             "favorites" -> channels.filter {
                 favorites.contains(it.second)
             }
@@ -782,29 +1056,27 @@ class MainActivity : Activity() {
                 selectedCategory == "All" ||
                 it.third == selectedCategory
             }
-
         }.filter {
             it.first.contains(query, true)
         }
 
-        filtered.forEach { channel ->
-            channelList.addView(createChannelCard(channel))
+        filtered.forEach {
+            channelList.addView(createChannelCard(it))
         }
 
         if (filtered.isEmpty()) {
-
-            val empty = label(
-                if (page == "favorites") "No favorites yet"
-                else if (page == "history") "No recently watched channels"
-                else "No channels found",
-                14f,
-                muted
-            ).apply {
-                gravity = Gravity.CENTER
-                setPadding(10, dp(35), 10, dp(35))
-            }
-
-            channelList.addView(empty)
+            channelList.addView(
+                label(
+                    if (page == "favorites") "♡  No favorites yet"
+                    else if (page == "history") "No recent channels"
+                    else "No channels found",
+                    14f,
+                    muted
+                ).apply {
+                    gravity = Gravity.CENTER
+                    setPadding(10, dp(35), 10, dp(35))
+                }
+            )
         }
     }
 
@@ -818,7 +1090,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(13), dp(13), dp(10), dp(13))
-            background = rounded(panel, 16)
+            background = rounded(panel, 17, 0xFF57318A.toInt())
         }
 
         val logo = TextView(this).apply {
@@ -827,14 +1099,11 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setTextColor(white)
             background = rounded(
-                Color.rgb(28, 65, 120), 13
+                Color.rgb(85, 35, 145), 13, purpleLight
             )
         }
 
-        card.addView(
-            logo,
-            LinearLayout.LayoutParams(dp(48), dp(48))
-        )
+        card.addView(logo, LinearLayout.LayoutParams(dp(48), dp(48)))
 
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -842,10 +1111,7 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
 
-        info.addView(
-            label(channel.first, 14f, white, true)
-        )
-
+        info.addView(label(channel.first, 14f, white, true))
         info.addView(
             label(channel.third, 10f, muted).apply {
                 setPadding(0, dp(4), 0, 0)
@@ -860,11 +1126,9 @@ class MainActivity : Activity() {
             red,
             true
         ).apply {
-
             setPadding(dp(10), dp(8), dp(8), dp(8))
 
             setOnClickListener {
-
                 if (!favorites.add(channel.second)) {
                     favorites.remove(channel.second)
                 }
@@ -880,7 +1144,6 @@ class MainActivity : Activity() {
         card.addView(favorite)
 
         card.setOnClickListener {
-
             history.remove(channel.second)
             history.add(0, channel.second)
 
@@ -895,30 +1158,27 @@ class MainActivity : Activity() {
             val intent = Intent(this, PlayerActivity::class.java)
             intent.putExtra("url", channel.second)
             intent.putExtra("name", channel.first)
-
             startActivity(intent)
         }
 
         val params = LinearLayout.LayoutParams(-1, -2)
-        params.setMargins(0, 0, 0, dp(10))
+        params.bottomMargin = dp(10)
         card.layoutParams = params
 
         return card
     }
 
-    // BACK BUTTON
+    // BACK
 
+    @Deprecated("Legacy back callback")
     override fun onBackPressed() {
-
         if (drawer.visibility == View.VISIBLE) {
             drawer.visibility = View.GONE
-
         } else if (page != "home") {
             page = "home"
             selectedCategory = "All"
             renderCategories()
             renderChannels()
-
         } else {
             super.onBackPressed()
         }
@@ -927,15 +1187,11 @@ class MainActivity : Activity() {
     // CLEANUP
 
     override fun onDestroy() {
-
         playlistRequestId++
-
         channelsListener?.remove()
         playlistListener?.remove()
-
         channelsListener = null
         playlistListener = null
-
         super.onDestroy()
     }
 }
