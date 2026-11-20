@@ -23,6 +23,7 @@ import android.text.InputType
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.DocumentSnapshot
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
@@ -31,9 +32,7 @@ import kotlin.concurrent.thread
 class MainActivity : Activity() {
 
     // FIREBASE ADMIN UID
-
-    private val ADMIN_UID =
-        "qVzYexoF4wcm7IBByOoA9yKeDy82"
+    private val ADMIN_UID = "qVzYexoF4wcm7IBByOoA9yKeDy82"
 
     private val bg = Color.rgb(8, 5, 20)
     private val panel = Color.rgb(25, 15, 45)
@@ -107,6 +106,26 @@ class MainActivity : Activity() {
     private var page = "home"
     private var query = ""
     private var playlistRequestId = 0
+
+    // BASIC ADMIN CHECK
+
+    private fun isAdmin(): Boolean {
+        return FirebaseAuth.getInstance()
+            .currentUser?.uid == ADMIN_UID
+    }
+
+    private fun requireAdmin(): Boolean {
+
+        if (isAdmin()) return true
+
+        Toast.makeText(
+            this,
+            "Admin login required. Please login again.",
+            Toast.LENGTH_LONG
+        ).show()
+
+        return false
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -185,7 +204,7 @@ class MainActivity : Activity() {
         }
     }
 
-    // INTERNET CONNECTION MONITORING
+    // INTERNET CONNECTION
 
     private fun startInternetMonitoring() {
 
@@ -250,9 +269,7 @@ class MainActivity : Activity() {
             )
         } else {
             connectionStatus.text = "● OFFLINE"
-            connectionStatus.setTextColor(
-                Color.rgb(255, 75, 120)
-            )
+            connectionStatus.setTextColor(red)
         }
     }
 
@@ -284,10 +301,7 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
 
-        brand.addView(
-            label("ASHIKA", 24f, purpleLight, true)
-        )
-
+        brand.addView(label("ASHIKA", 24f, purpleLight, true))
         brand.addView(
             label("LIVE TELEVISION • PREMIUM", 9f, muted, true)
         )
@@ -305,7 +319,6 @@ class MainActivity : Activity() {
         header.addView(menu)
         header.addView(brand)
         header.addView(connectionStatus)
-
         root.addView(header)
 
         val hero = LinearLayout(this).apply {
@@ -357,12 +370,10 @@ class MainActivity : Activity() {
 
         val heroParams = LinearLayout.LayoutParams(-2, -2)
         heroParams.topMargin = dp(17)
-
         hero.addView(explore, heroParams)
 
         val heroOuter = LinearLayout.LayoutParams(-1, -2)
         heroOuter.topMargin = dp(18)
-
         root.addView(hero, heroOuter)
 
         val section = LinearLayout(this).apply {
@@ -376,12 +387,7 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, -2, 1f)
         )
 
-        val refresh = label(
-            "↻ Refresh",
-            13f,
-            purpleLight,
-            true
-        )
+        val refresh = label("↻ Refresh", 13f, purpleLight, true)
 
         refresh.setOnClickListener {
             loadChannels()
@@ -390,7 +396,7 @@ class MainActivity : Activity() {
         section.addView(refresh)
         root.addView(section)
 
-        // SEARCH + VOICE SEARCH
+        // SEARCH
 
         val searchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -416,11 +422,7 @@ class MainActivity : Activity() {
             startVoiceSearch()
         }
 
-        val micParams = LinearLayout.LayoutParams(
-            dp(52),
-            dp(48)
-        )
-
+        val micParams = LinearLayout.LayoutParams(dp(52), dp(48))
         micParams.marginStart = dp(8)
 
         searchRow.addView(mic, micParams)
@@ -437,15 +439,9 @@ class MainActivity : Activity() {
 
         val catParams = LinearLayout.LayoutParams(-1, -2)
         catParams.topMargin = dp(13)
-
         root.addView(categoryScroll, catParams)
 
-        status = label(
-            "Connecting to Firebase...",
-            12f,
-            muted
-        )
-
+        status = label("Connecting to Firebase...", 12f, muted)
         status.setPadding(0, dp(13), 0, dp(8))
         root.addView(status)
 
@@ -483,46 +479,28 @@ class MainActivity : Activity() {
 
         navItems.forEachIndexed { index, title ->
 
-            val item = label(
-                title,
-                12f,
-                purpleLight,
-                true
-            ).apply {
-
+            val item = label(title, 12f, purpleLight, true).apply {
                 gravity = Gravity.CENTER
-
-                setPadding(
-                    dp(5),
-                    dp(5),
-                    dp(5),
-                    dp(5)
-                )
-
+                setPadding(dp(5), dp(5), dp(5), dp(5))
                 layoutParams =
                     LinearLayout.LayoutParams(0, -2, 1f)
 
                 setOnClickListener {
-
                     when (index) {
-
                         0 -> {
                             page = "home"
                             selectedCategory = "All"
                             renderCategories()
                             renderChannels()
                         }
-
                         1 -> {
                             page = "favorites"
                             renderChannels()
                         }
-
                         2 -> {
                             page = "history"
                             renderChannels()
                         }
-
                         3 -> showSettings()
                     }
                 }
@@ -533,7 +511,6 @@ class MainActivity : Activity() {
 
         val bottomParams = LinearLayout.LayoutParams(-1, -2)
         bottomParams.topMargin = dp(8)
-
         root.addView(bottom, bottomParams)
 
         outer.addView(root)
@@ -541,11 +518,7 @@ class MainActivity : Activity() {
         drawer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(28), dp(18), dp(20))
-            background = rounded(
-                Color.rgb(18, 9, 35),
-                0,
-                purple
-            )
+            background = rounded(Color.rgb(18, 9, 35), 0, purple)
             elevation = dp(20).toFloat()
             visibility = View.GONE
         }
@@ -565,7 +538,6 @@ class MainActivity : Activity() {
 
         search.addTextChangedListener(
             object : TextWatcher {
-
                 override fun beforeTextChanged(
                     s: CharSequence?,
                     start: Int,
@@ -618,7 +590,6 @@ class MainActivity : Activity() {
             startActivityForResult(intent, 501)
 
         } catch (e: Exception) {
-
             Toast.makeText(
                 this,
                 "Voice search is not available",
@@ -636,7 +607,6 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
 
         if (requestCode == 501 && resultCode == RESULT_OK) {
-
             val results = data?.getStringArrayListExtra(
                 RecognizerIntent.EXTRA_RESULTS
             )
@@ -654,10 +624,7 @@ class MainActivity : Activity() {
 
         drawer.removeAllViews()
 
-        drawer.addView(
-            label("ASHIKA", 25f, purpleLight, true)
-        )
-
+        drawer.addView(label("ASHIKA", 25f, purpleLight, true))
         drawer.addView(
             label("NEON PURPLE PREMIUM", 10f, muted, true)
         )
@@ -703,7 +670,6 @@ class MainActivity : Activity() {
         }
 
         addDrawerItem("ℹ️   About") {
-
             AlertDialog.Builder(this)
                 .setTitle("Ashika Live TV")
                 .setMessage(
@@ -711,8 +677,7 @@ class MainActivity : Activity() {
                     "Firebase + Multiple M3U Playlists\n" +
                     "Channels: ${channels.size}\n" +
                     "Internet: ${
-                        if (isInternetAvailable()) "Online"
-                        else "Offline"
+                        if (isInternetAvailable()) "Online" else "Offline"
                     }"
                 )
                 .setPositiveButton("OK", null)
@@ -727,20 +692,8 @@ class MainActivity : Activity() {
         action: () -> Unit
     ) {
 
-        val item = label(
-            text,
-            15f,
-            white,
-            true
-        ).apply {
-
-            setPadding(
-                dp(12),
-                dp(17),
-                dp(8),
-                dp(17)
-            )
-
+        val item = label(text, 15f, white, true).apply {
+            setPadding(dp(12), dp(17), dp(8), dp(17))
             setOnClickListener {
                 drawer.visibility = View.GONE
                 action()
@@ -768,17 +721,13 @@ class MainActivity : Activity() {
                 "Channels: ${channels.size}\n" +
                 "Favorites: ${favorites.size}\n" +
                 "Internet: ${
-                    if (isInternetAvailable()) "ONLINE"
-                    else "OFFLINE"
+                    if (isInternetAvailable()) "ONLINE" else "OFFLINE"
                 }\n" +
                 "PIN Lock: ${
-                    if (prefs.getBoolean("pin_enabled", false))
-                        "ON"
-                    else
-                        "OFF"
+                    if (prefs.getBoolean("pin_enabled", false)) "ON" else "OFF"
                 }\n\n" +
                 "Player and Picture-in-Picture settings " +
-                "will be configured in PlayerActivity."
+                "are configured in PlayerActivity."
             )
             .setPositiveButton("PIN Settings") { _, _ ->
                 showPinSettings()
@@ -799,51 +748,42 @@ class MainActivity : Activity() {
         }
 
         val box = LinearLayout(this).apply {
-            setPadding(
-                dp(22),
-                dp(10),
-                dp(22),
-                dp(5)
-            )
+            setPadding(dp(22), dp(10), dp(22), dp(5))
             addView(input)
         }
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Set App PIN")
-            .setMessage(
-                "Create a PIN for app lock and Admin Panel."
-            )
+            .setMessage("Create a PIN for app lock and Admin Panel.")
             .setView(box)
             .setPositiveButton("Save", null)
             .setNegativeButton("Cancel", null)
             .create()
 
         dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener {
 
-            dialog.getButton(
-                AlertDialog.BUTTON_POSITIVE
-            ).setOnClickListener {
+                    val pin = input.text.toString()
 
-                val pin = input.text.toString()
+                    if (!pin.matches(Regex("\\d{4,8}"))) {
+                        input.error = "Enter 4 to 8 digits"
+                        return@setOnClickListener
+                    }
 
-                if (!pin.matches(Regex("\\d{4,8}"))) {
-                    input.error = "Enter 4 to 8 digits"
-                    return@setOnClickListener
+                    prefs.edit()
+                        .putString("app_pin", pin)
+                        .putBoolean("pin_enabled", true)
+                        .apply()
+
+                    Toast.makeText(
+                        this,
+                        "PIN lock enabled",
+                        Toast.LENGTH_SHORT
+                    ).show()
+
+                    dialog.dismiss()
                 }
-
-                prefs.edit()
-                    .putString("app_pin", pin)
-                    .putBoolean("pin_enabled", true)
-                    .apply()
-
-                Toast.makeText(
-                    this,
-                    "PIN lock enabled",
-                    Toast.LENGTH_SHORT
-                ).show()
-
-                dialog.dismiss()
-            }
         }
 
         dialog.show()
@@ -867,33 +807,29 @@ class MainActivity : Activity() {
             .create()
 
         dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener {
 
-            dialog.getButton(
-                AlertDialog.BUTTON_POSITIVE
-            ).setOnClickListener {
+                    val savedPin = prefs.getString("app_pin", "")
 
-                val savedPin =
-                    prefs.getString("app_pin", "")
-
-                if (input.text.toString() == savedPin) {
-                    dialog.dismiss()
-                } else {
-                    input.error = "Incorrect PIN"
+                    if (input.text.toString() == savedPin) {
+                        dialog.dismiss()
+                    } else {
+                        input.error = "Incorrect PIN"
+                    }
                 }
-            }
         }
 
         dialog.show()
     }
 
-    // ADMIN PANEL + FIREBASE AUTHENTICATION
+    // ADMIN LOGIN
 
     private fun showAdminPanel() {
 
         val savedPin = prefs.getString("app_pin", null)
 
         if (savedPin.isNullOrBlank()) {
-
             AlertDialog.Builder(this)
                 .setTitle("Admin Panel Locked")
                 .setMessage(
@@ -915,24 +851,28 @@ class MainActivity : Activity() {
             setHintTextColor(muted)
         }
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Admin Authentication")
             .setMessage("Enter your app PIN.")
             .setView(input)
-            .setPositiveButton("Continue") { _, _ ->
-
-                if (input.text.toString() == savedPin) {
-                    showFirebaseAdminLogin()
-                } else {
-                    Toast.makeText(
-                        this,
-                        "Incorrect PIN",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-            }
+            .setPositiveButton("Continue", null)
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener {
+
+                    if (input.text.toString() == savedPin) {
+                        dialog.dismiss()
+                        showFirebaseAdminLogin()
+                    } else {
+                        input.error = "Incorrect PIN"
+                    }
+                }
+        }
+
+        dialog.show()
     }
 
     private fun showFirebaseAdminLogin() {
@@ -966,9 +906,7 @@ class MainActivity : Activity() {
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("🔐 Firebase Admin Login")
-            .setMessage(
-                "Enter your Firebase Admin Email and Password."
-            )
+            .setMessage("Enter your Firebase Admin Email and Password.")
             .setView(box)
             .setPositiveButton("Login", null)
             .setNegativeButton("Cancel", null)
@@ -976,17 +914,13 @@ class MainActivity : Activity() {
 
         dialog.setOnShowListener {
 
-            val loginButton = dialog.getButton(
-                AlertDialog.BUTTON_POSITIVE
-            )
+            val loginButton =
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE)
 
             loginButton.setOnClickListener {
 
-                val adminEmail =
-                    email.text.toString().trim()
-
-                val adminPassword =
-                    password.text.toString()
+                val adminEmail = email.text.toString().trim()
+                val adminPassword = password.text.toString()
 
                 if (adminEmail.isBlank()) {
                     email.error = "Enter Admin Email"
@@ -1010,9 +944,8 @@ class MainActivity : Activity() {
 
                         if (task.isSuccessful) {
 
-                            val user = FirebaseAuth
-                                .getInstance()
-                                .currentUser
+                            val user =
+                                FirebaseAuth.getInstance().currentUser
 
                             if (user?.uid == ADMIN_UID) {
 
@@ -1048,8 +981,7 @@ class MainActivity : Activity() {
                             Toast.makeText(
                                 this,
                                 "Login Failed: ${
-                                    task.exception?.message
-                                        ?: "Unknown error"
+                                    task.exception?.message ?: "Unknown error"
                                 }",
                                 Toast.LENGTH_LONG
                             ).show()
@@ -1061,77 +993,132 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
+    // ADMIN SESSION VERIFICATION + MENU
+
     private fun openAdminOptions() {
 
-        val currentUid = FirebaseAuth
-            .getInstance()
-            .currentUser?.uid
+        val user = FirebaseAuth.getInstance().currentUser
 
-        if (currentUid != ADMIN_UID) {
-
+        if (user == null || user.uid != ADMIN_UID) {
             Toast.makeText(
                 this,
                 "Admin authentication required",
                 Toast.LENGTH_LONG
             ).show()
-
             return
         }
 
-        val options = arrayOf(
-            "Add Channel",
-            "Refresh Channels",
-            "View Channel Count",
-            "Admin Logout"
-        )
+        user.reload().addOnCompleteListener { task ->
 
-        AlertDialog.Builder(this)
-            .setTitle("ASHIKA ADMIN PANEL")
-            .setItems(options) { _, which ->
+            val verifiedUser = FirebaseAuth.getInstance().currentUser
 
-                when (which) {
+            if (
+                !task.isSuccessful ||
+                verifiedUser == null ||
+                verifiedUser.uid != ADMIN_UID
+            ) {
+                FirebaseAuth.getInstance().signOut()
 
-                    0 -> addAdminChannel()
+                Toast.makeText(
+                    this,
+                    "Admin session invalid. Login again.",
+                    Toast.LENGTH_LONG
+                ).show()
 
-                    1 -> loadChannels()
+                return@addOnCompleteListener
+            }
 
-                    2 -> AlertDialog.Builder(this)
-                        .setMessage(
-                            "Total channels: ${channels.size}"
-                        )
-                        .setPositiveButton("OK", null)
-                        .show()
+            val options = arrayOf(
+                "📊 Admin Dashboard",
+                "➕ Add Channel",
+                "📺 Manage Channels",
+                "📂 Manage M3U Playlists",
+                "🔄 Refresh Channels",
+                "🚪 Admin Logout"
+            )
 
-                    3 -> {
+            AlertDialog.Builder(this)
+                .setTitle("ASHIKA ADMIN PANEL")
+                .setItems(options) { _, which ->
 
-                        FirebaseAuth.getInstance().signOut()
+                    when (which) {
+                        0 -> showAdminDashboard()
+                        1 -> addAdminChannel()
+                        2 -> showChannelManager()
+                        3 -> showPlaylistManager()
+                        4 -> loadChannels()
+                        5 -> {
+                            FirebaseAuth.getInstance().signOut()
 
-                        Toast.makeText(
-                            this,
-                            "Admin Logged Out",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                            Toast.makeText(
+                                this,
+                                "Admin Logged Out",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }
                 }
+                .show()
+        }
+    }
+
+    // ADMIN DASHBOARD
+
+    private fun showAdminDashboard() {
+
+        if (!requireAdmin()) return
+
+        val db = FirebaseFirestore.getInstance()
+
+        db.collection("channels")
+            .get()
+            .addOnSuccessListener { snapshot ->
+
+                val total = snapshot.size()
+                val enabled = snapshot.documents.count {
+                    it.getBoolean("enabled") == true
+                }
+                val disabled = total - enabled
+
+                db.collection("settings")
+                    .document("playlist")
+                    .get()
+                    .addOnSuccessListener { playlistDoc ->
+
+                        val playlists =
+                            getPlaylistMaps(playlistDoc)
+
+                        AlertDialog.Builder(this)
+                            .setTitle("📊 ADMIN DASHBOARD")
+                            .setMessage(
+                                "ASHIKA LIVE TV\n\n" +
+                                "Total Firebase Channels: $total\n" +
+                                "Enabled Channels: $enabled\n" +
+                                "Disabled Channels: $disabled\n" +
+                                "M3U Playlists: ${playlists.size}\n" +
+                                "Loaded Channels: ${channels.size}\n\n" +
+                                "Admin UID: Verified"
+                            )
+                            .setPositiveButton("OK", null)
+                            .setNeutralButton("Manage Channels") { _, _ ->
+                                showChannelManager()
+                            }
+                            .show()
+                    }
+                    .addOnFailureListener {
+                        showError("Dashboard error: ${it.message}")
+                    }
             }
-            .show()
+            .addOnFailureListener {
+                showError("Dashboard error: ${it.message}")
+            }
     }
 
     // ADD CHANNEL
 
     private fun addAdminChannel() {
 
-        if (
-            FirebaseAuth.getInstance()
-                .currentUser?.uid != ADMIN_UID
-        ) {
-            Toast.makeText(
-                this,
-                "Admin login required",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
+        if (!requireAdmin()) return
 
         val name = EditText(this).apply {
             hint = "Channel name"
@@ -1150,95 +1137,631 @@ class MainActivity : Activity() {
 
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                dp(20),
-                dp(5),
-                dp(20),
-                dp(5)
-            )
-
+            setPadding(dp(20), dp(5), dp(20), dp(5))
             addView(name)
             addView(url)
             addView(category)
         }
 
-        AlertDialog.Builder(this)
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Add New Channel")
             .setView(box)
-            .setPositiveButton("Save") { _, _ ->
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel", null)
+            .create()
 
-                val channelName =
-                    name.text.toString().trim()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener {
 
-                val streamUrl =
-                    url.text.toString().trim()
+                    val channelName = name.text.toString().trim()
+                    val streamUrl = url.text.toString().trim()
+                    val channelCategory =
+                        category.text.toString().trim().ifBlank { "Other" }
 
-                val channelCategory =
-                    category.text.toString()
-                        .trim()
-                        .ifBlank { "Other" }
+                    if (channelName.isBlank()) {
+                        name.error = "Enter channel name"
+                        return@setOnClickListener
+                    }
 
-                if (
-                    channelName.isBlank() ||
-                    !(
-                        streamUrl.startsWith("https://") ||
-                        streamUrl.startsWith("http://")
-                    )
-                ) {
+                    if (!isValidHttpUrl(streamUrl)) {
+                        url.error = "Enter a valid HTTP(S) URL"
+                        return@setOnClickListener
+                    }
 
+                    if (!requireAdmin()) return@setOnClickListener
+
+                    FirebaseFirestore.getInstance()
+                        .collection("channels")
+                        .add(
+                            hashMapOf(
+                                "name" to channelName,
+                                "url" to streamUrl,
+                                "category" to channelCategory,
+                                "enabled" to true
+                            )
+                        )
+                        .addOnSuccessListener {
+                            dialog.dismiss()
+                            Toast.makeText(
+                                this,
+                                "Channel added successfully",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        .addOnFailureListener {
+                            showError("Firebase error: ${it.message}")
+                        }
+                }
+        }
+
+        dialog.show()
+    }
+
+    // CHANNEL MANAGER
+
+    private fun showChannelManager() {
+
+        if (!requireAdmin()) return
+
+        FirebaseFirestore.getInstance()
+            .collection("channels")
+            .get()
+            .addOnSuccessListener { snapshot ->
+
+                val documents = snapshot.documents
+
+                if (documents.isEmpty()) {
                     Toast.makeText(
                         this,
-                        "Enter a channel name and valid HTTP(S) URL",
-                        Toast.LENGTH_LONG
+                        "No Firebase channels found",
+                        Toast.LENGTH_SHORT
                     ).show()
-
-                    return@setPositiveButton
+                    return@addOnSuccessListener
                 }
 
-                if (
-                    FirebaseAuth.getInstance()
-                        .currentUser?.uid != ADMIN_UID
-                ) {
-                    Toast.makeText(
-                        this,
-                        "Admin session expired. Login again.",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    return@setPositiveButton
+                val names = documents.map { doc ->
+                    val name = doc.getString("name") ?: "Unnamed"
+                    val category = doc.getString("category") ?: "Other"
+                    val enabled = doc.getBoolean("enabled") == true
+
+                    "$name | $category | ${if (enabled) "ON" else "OFF"}"
+                }.toTypedArray()
+
+                AlertDialog.Builder(this)
+                    .setTitle("📺 MANAGE CHANNELS")
+                    .setItems(names) { _, index ->
+                        showChannelActions(documents[index].id)
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+            .addOnFailureListener {
+                showError("Channel loading error: ${it.message}")
+            }
+    }
+
+    private fun showChannelActions(documentId: String) {
+
+        if (!requireAdmin()) return
+
+        val options = arrayOf(
+            "✏️ Edit Channel",
+            "🗑 Delete Channel"
+        )
+
+        AlertDialog.Builder(this)
+            .setTitle("Channel Management")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> editAdminChannel(documentId)
+                    1 -> deleteAdminChannel(documentId)
                 }
+            }
+            .show()
+    }
+
+    private fun editAdminChannel(documentId: String) {
+
+        if (!requireAdmin()) return
+
+        val ref = FirebaseFirestore.getInstance()
+            .collection("channels")
+            .document(documentId)
+
+        ref.get().addOnSuccessListener { doc ->
+
+            if (!doc.exists()) {
+                showError("Channel not found")
+                return@addOnSuccessListener
+            }
+
+            val name = EditText(this).apply {
+                hint = "Channel name"
+                setText(doc.getString("name") ?: "")
+                setTextColor(white)
+            }
+
+            val url = EditText(this).apply {
+                hint = "Stream URL"
+                setText(doc.getString("url") ?: "")
+                setTextColor(white)
+            }
+
+            val category = EditText(this).apply {
+                hint = "Category"
+                setText(doc.getString("category") ?: "Other")
+                setTextColor(white)
+            }
+
+            val enabled = CheckBox(this).apply {
+                text = "Channel Enabled"
+                setTextColor(white)
+                isChecked = doc.getBoolean("enabled") == true
+            }
+
+            val box = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), dp(8), dp(20), dp(8))
+                addView(name)
+                addView(url)
+                addView(category)
+                addView(enabled)
+            }
+
+            val dialog = AlertDialog.Builder(this)
+                .setTitle("✏️ Edit Channel")
+                .setView(box)
+                .setPositiveButton("Update", null)
+                .setNegativeButton("Cancel", null)
+                .create()
+
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                    .setOnClickListener {
+
+                        val newName = name.text.toString().trim()
+                        val newUrl = url.text.toString().trim()
+                        val newCategory = category.text.toString().trim()
+
+                        if (newName.isBlank()) {
+                            name.error = "Enter channel name"
+                            return@setOnClickListener
+                        }
+
+                        if (!isValidHttpUrl(newUrl)) {
+                            url.error = "Enter a valid URL"
+                            return@setOnClickListener
+                        }
+
+                        if (!requireAdmin()) return@setOnClickListener
+
+                        ref.update(
+                            mapOf(
+                                "name" to newName,
+                                "url" to newUrl,
+                                "category" to newCategory.ifBlank { "Other" },
+                                "enabled" to enabled.isChecked
+                            )
+                        )
+                            .addOnSuccessListener {
+                                dialog.dismiss()
+                                Toast.makeText(
+                                    this,
+                                    "Channel updated successfully",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                            .addOnFailureListener {
+                                showError("Update failed: ${it.message}")
+                            }
+                    }
+            }
+
+            dialog.show()
+        }
+            .addOnFailureListener {
+                showError("Could not load channel: ${it.message}")
+            }
+    }
+
+    private fun deleteAdminChannel(documentId: String) {
+
+        if (!requireAdmin()) return
+
+        AlertDialog.Builder(this)
+            .setTitle("Delete Channel?")
+            .setMessage(
+                "এই Channel-টি Firebase থেকে স্থায়ীভাবে মুছে যাবে।"
+            )
+            .setPositiveButton("Delete") { _, _ ->
+
+                if (!requireAdmin()) return@setPositiveButton
 
                 FirebaseFirestore.getInstance()
                     .collection("channels")
-                    .add(
-                        hashMapOf(
-                            "name" to channelName,
-                            "url" to streamUrl,
-                            "category" to channelCategory,
-                            "enabled" to true
-                        )
-                    )
+                    .document(documentId)
+                    .delete()
                     .addOnSuccessListener {
-
                         Toast.makeText(
                             this,
-                            "Channel added successfully",
+                            "Channel deleted",
                             Toast.LENGTH_SHORT
                         ).show()
                     }
                     .addOnFailureListener {
-
-                        Toast.makeText(
-                            this,
-                            "Firebase error: ${it.message}",
-                            Toast.LENGTH_LONG
-                        ).show()
+                        showError("Delete failed: ${it.message}")
                     }
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
-    // FIREBASE + PLAYLISTS
+    // PLAYLIST MANAGER
+
+    private fun showPlaylistManager() {
+
+        if (!requireAdmin()) return
+
+        FirebaseFirestore.getInstance()
+            .collection("settings")
+            .document("playlist")
+            .get()
+            .addOnSuccessListener { doc ->
+
+                val playlists = getPlaylistMaps(doc)
+
+                val options = arrayOf(
+                    "➕ Add New Playlist",
+                    "✏️ Edit Playlist",
+                    "🗑 Delete Playlist",
+                    "📋 View Playlists"
+                )
+
+                AlertDialog.Builder(this)
+                    .setTitle("📂 M3U PLAYLIST MANAGER")
+                    .setItems(options) { _, which ->
+
+                        when (which) {
+                            0 -> addM3UPlaylist()
+                            1 -> selectPlaylistForEdit(playlists)
+                            2 -> selectPlaylistForDelete(playlists)
+                            3 -> viewM3UPlaylists(playlists)
+                        }
+                    }
+                    .setNegativeButton("Close", null)
+                    .show()
+            }
+            .addOnFailureListener {
+                showError("Playlist error: ${it.message}")
+            }
+    }
+
+    private fun getPlaylistMaps(
+        doc: DocumentSnapshot
+    ): MutableList<MutableMap<String, Any>> {
+
+        val result = mutableListOf<MutableMap<String, Any>>()
+
+        val saved = doc.get("playlists") as? List<*>
+
+        if (saved != null) {
+
+            saved.forEach { item ->
+
+                val data = item as? Map<*, *> ?: return@forEach
+
+                val name = data["name"] as? String ?: return@forEach
+                val url = data["url"] as? String ?: return@forEach
+
+                result.add(
+                    mutableMapOf(
+                        "name" to name,
+                        "url" to url,
+                        "enabled" to (data["enabled"] == true)
+                    )
+                )
+            }
+
+        } else {
+
+            val oldUrl = doc.getString("url").orEmpty()
+
+            if (oldUrl.isNotBlank()) {
+                result.add(
+                    mutableMapOf(
+                        "name" to "Old Playlist",
+                        "url" to oldUrl,
+                        "enabled" to (doc.getBoolean("enabled") == true)
+                    )
+                )
+            }
+        }
+
+        return result
+    }
+
+    private fun savePlaylistMaps(
+        playlists: List<MutableMap<String, Any>>,
+        successMessage: String
+    ) {
+
+        if (!requireAdmin()) return
+
+        FirebaseFirestore.getInstance()
+            .collection("settings")
+            .document("playlist")
+            .set(mapOf("playlists" to playlists))
+            .addOnSuccessListener {
+                Toast.makeText(
+                    this,
+                    successMessage,
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .addOnFailureListener {
+                showError("Playlist save failed: ${it.message}")
+            }
+    }
+
+    private fun addM3UPlaylist() {
+
+        if (!requireAdmin()) return
+
+        val name = EditText(this).apply {
+            hint = "Playlist name"
+            setTextColor(white)
+        }
+
+        val url = EditText(this).apply {
+            hint = "M3U URL"
+            setTextColor(white)
+        }
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+            addView(name)
+            addView(url)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("➕ Add M3U Playlist")
+            .setView(box)
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener {
+
+                    val playlistName = name.text.toString().trim()
+                    val playlistUrl = url.text.toString().trim()
+
+                    if (playlistName.isBlank()) {
+                        name.error = "Enter playlist name"
+                        return@setOnClickListener
+                    }
+
+                    if (!isValidHttpUrl(playlistUrl)) {
+                        url.error = "Enter valid playlist URL"
+                        return@setOnClickListener
+                    }
+
+                    if (!requireAdmin()) return@setOnClickListener
+
+                    val ref = FirebaseFirestore.getInstance()
+                        .collection("settings")
+                        .document("playlist")
+
+                    ref.get().addOnSuccessListener { doc ->
+
+                        val playlists = getPlaylistMaps(doc)
+
+                        playlists.add(
+                            mutableMapOf(
+                                "name" to playlistName,
+                                "url" to playlistUrl,
+                                "enabled" to true
+                            )
+                        )
+
+                        savePlaylistMaps(
+                            playlists,
+                            "Playlist added successfully"
+                        )
+
+                        dialog.dismiss()
+                    }
+                        .addOnFailureListener {
+                            showError("Could not load playlists: ${it.message}")
+                        }
+                }
+        }
+
+        dialog.show()
+    }
+
+    private fun viewM3UPlaylists(
+        playlists: List<MutableMap<String, Any>>
+    ) {
+
+        if (playlists.isEmpty()) {
+            Toast.makeText(
+                this,
+                "No playlists found",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        val details = playlists.mapIndexed { index, item ->
+            "${index + 1}. ${item["name"]}\n" +
+            "${item["url"]}\n" +
+            "Status: ${if (item["enabled"] == true) "Enabled" else "Disabled"}"
+        }.joinToString("\n\n")
+
+        AlertDialog.Builder(this)
+            .setTitle("Saved M3U Playlists")
+            .setMessage(details)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
+    private fun selectPlaylistForEdit(
+        playlists: MutableList<MutableMap<String, Any>>
+    ) {
+
+        if (playlists.isEmpty()) {
+            Toast.makeText(
+                this,
+                "No playlists found",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        val names = playlists.map {
+            it["name"].toString()
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Select Playlist to Edit")
+            .setItems(names) { _, index ->
+                editM3UPlaylist(playlists, index)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun editM3UPlaylist(
+        playlists: MutableList<MutableMap<String, Any>>,
+        index: Int
+    ) {
+
+        if (!requireAdmin()) return
+
+        val item = playlists[index]
+
+        val name = EditText(this).apply {
+            hint = "Playlist name"
+            setText(item["name"].toString())
+            setTextColor(white)
+        }
+
+        val url = EditText(this).apply {
+            hint = "Playlist URL"
+            setText(item["url"].toString())
+            setTextColor(white)
+        }
+
+        val enabled = CheckBox(this).apply {
+            text = "Playlist Enabled"
+            setTextColor(white)
+            isChecked = item["enabled"] == true
+        }
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+            addView(name)
+            addView(url)
+            addView(enabled)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Edit Playlist")
+            .setView(box)
+            .setPositiveButton("Update", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener {
+
+                    val newName = name.text.toString().trim()
+                    val newUrl = url.text.toString().trim()
+
+                    if (newName.isBlank()) {
+                        name.error = "Enter playlist name"
+                        return@setOnClickListener
+                    }
+
+                    if (!isValidHttpUrl(newUrl)) {
+                        url.error = "Enter valid playlist URL"
+                        return@setOnClickListener
+                    }
+
+                    if (!requireAdmin()) return@setOnClickListener
+
+                    playlists[index] = mutableMapOf(
+                        "name" to newName,
+                        "url" to newUrl,
+                        "enabled" to enabled.isChecked
+                    )
+
+                    savePlaylistMaps(
+                        playlists,
+                        "Playlist updated successfully"
+                    )
+
+                    dialog.dismiss()
+                }
+        }
+
+        dialog.show()
+    }
+
+    private fun selectPlaylistForDelete(
+        playlists: MutableList<MutableMap<String, Any>>
+    ) {
+
+        if (playlists.isEmpty()) {
+            Toast.makeText(
+                this,
+                "No playlists found",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        val names = playlists.map {
+            it["name"].toString()
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Select Playlist to Delete")
+            .setItems(names) { _, index ->
+
+                AlertDialog.Builder(this)
+                    .setTitle("Delete Playlist?")
+                    .setMessage(
+                        "Are you sure you want to delete " +
+                        "${playlists[index]["name"]}?"
+                    )
+                    .setPositiveButton("Delete") { _, _ ->
+
+                        if (!requireAdmin()) {
+                            return@setPositiveButton
+                        }
+
+                        playlists.removeAt(index)
+
+                        savePlaylistMaps(
+                            playlists,
+                            "Playlist deleted successfully"
+                        )
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // FIREBASE + PLAYLIST LOADING
 
     private fun loadChannels() {
 
@@ -1259,8 +1782,7 @@ class MainActivity : Activity() {
             .addSnapshotListener { snapshot, error ->
 
                 if (error != null) {
-                    status.text =
-                        "Firebase error: ${error.message}"
+                    status.text = "Firebase error: ${error.message}"
                     return@addSnapshotListener
                 }
 
@@ -1272,8 +1794,7 @@ class MainActivity : Activity() {
 
                     val name = doc.getString("name")
                     val url = doc.getString("url")
-                    val category =
-                        doc.getString("category") ?: "Other"
+                    val category = doc.getString("category") ?: "Other"
 
                     if (
                         !name.isNullOrBlank() &&
@@ -1293,25 +1814,20 @@ class MainActivity : Activity() {
             .addSnapshotListener { snapshot, error ->
 
                 if (error != null) {
-                    status.text =
-                        "Playlist settings error: ${error.message}"
+                    status.text = "Playlist settings error: ${error.message}"
                     return@addSnapshotListener
                 }
 
                 if (snapshot == null || !snapshot.exists()) {
-
                     playlistRequestId++
                     playlistChannels.clear()
                     updateCombinedChannels()
-
                     return@addSnapshotListener
                 }
 
-                val items =
-                    mutableListOf<Pair<String, String>>()
+                val items = mutableListOf<Pair<String, String>>()
 
-                val saved =
-                    snapshot.get("playlists") as? List<*>
+                val saved = snapshot.get("playlists") as? List<*>
 
                 if (saved != null) {
 
@@ -1320,14 +1836,9 @@ class MainActivity : Activity() {
                         val data = item as? Map<*, *>
                             ?: return@forEach
 
-                        val name =
-                            data["name"] as? String ?: "Playlist"
-
-                        val url =
-                            data["url"] as? String ?: ""
-
-                        val enabled =
-                            data["enabled"] == true
+                        val name = data["name"] as? String ?: "Playlist"
+                        val url = data["url"] as? String ?: ""
+                        val enabled = data["enabled"] == true
 
                         if (enabled && url.isNotBlank()) {
                             items.add(name to url)
@@ -1336,13 +1847,11 @@ class MainActivity : Activity() {
 
                 } else {
 
-                    val oldUrl =
-                        snapshot.getString("url")
-                            ?.trim()
-                            .orEmpty()
+                    val oldUrl = snapshot.getString("url")
+                        ?.trim()
+                        .orEmpty()
 
-                    val enabled =
-                        snapshot.getBoolean("enabled") == true
+                    val enabled = snapshot.getBoolean("enabled") == true
 
                     if (enabled && oldUrl.isNotBlank()) {
                         items.add("Old Playlist" to oldUrl)
@@ -1377,15 +1886,12 @@ class MainActivity : Activity() {
 
         if (
             selectedCategory != "All" &&
-            channels.none {
-                it.third == selectedCategory
-            }
+            channels.none { it.third == selectedCategory }
         ) {
             selectedCategory = "All"
         }
 
-        status.text =
-            "${channels.size} CHANNELS AVAILABLE"
+        status.text = "${channels.size} CHANNELS AVAILABLE"
 
         renderCategories()
         renderChannels()
@@ -1400,10 +1906,8 @@ class MainActivity : Activity() {
         val requestId = playlistRequestId
 
         if (playlistItems.isEmpty()) {
-
             playlistChannels.clear()
             updateCombinedChannels()
-
             return
         }
 
@@ -1424,7 +1928,6 @@ class MainActivity : Activity() {
                 var connection: HttpURLConnection? = null
 
                 try {
-
                     connection = URL(playlist.second)
                         .openConnection() as HttpURLConnection
 
@@ -1440,9 +1943,7 @@ class MainActivity : Activity() {
                     connection.connect()
 
                     if (connection.responseCode !in 200..299) {
-                        throw Exception(
-                            "HTTP ${connection.responseCode}"
-                        )
+                        throw Exception("HTTP ${connection.responseCode}")
                     }
 
                     val content = connection.inputStream
@@ -1459,23 +1960,15 @@ class MainActivity : Activity() {
                             "${playlist.first} • ${it.third}"
                         }
 
-                        all.add(
-                            Triple(it.first, it.second, cat)
-                        )
+                        all.add(Triple(it.first, it.second, cat))
                     }
 
                     if (parsed.isEmpty()) {
-                        errors.add(
-                            "${playlist.first}: Empty playlist"
-                        )
+                        errors.add("${playlist.first}: Empty playlist")
                     }
 
                 } catch (e: Exception) {
-
-                    errors.add(
-                        "${playlist.first}: ${e.message}"
-                    )
-
+                    errors.add("${playlist.first}: ${e.message}")
                 } finally {
                     connection?.disconnect()
                 }
@@ -1483,10 +1976,7 @@ class MainActivity : Activity() {
 
             runOnUiThread {
 
-                if (
-                    isFinishing ||
-                    requestId != playlistRequestId
-                ) {
+                if (isFinishing || requestId != playlistRequestId) {
                     return@runOnUiThread
                 }
 
@@ -1542,13 +2032,10 @@ class MainActivity : Activity() {
 
                 currentName =
                     tvgName?.takeIf { it.isNotBlank() }
-                        ?: displayName.ifBlank {
-                            "Unknown Channel"
-                        }
+                        ?: displayName.ifBlank { "Unknown Channel" }
 
                 currentCategory =
-                    group?.takeIf { it.isNotBlank() }
-                        ?: "Other"
+                    group?.takeIf { it.isNotBlank() } ?: "Other"
 
             } else if (
                 !line.startsWith("#") &&
@@ -1559,7 +2046,6 @@ class MainActivity : Activity() {
             ) {
 
                 if (currentName.isNotBlank()) {
-
                     result.add(
                         Triple(
                             currentName,
@@ -1577,7 +2063,7 @@ class MainActivity : Activity() {
         return result
     }
 
-    // CATEGORIES
+    // CATEGORY FILTER
 
     private fun renderCategories() {
 
@@ -1588,8 +2074,7 @@ class MainActivity : Activity() {
 
         categories.forEach { category ->
 
-            val selected =
-                selectedCategory == category
+            val selected = selectedCategory == category
 
             val chip = label(
                 category,
@@ -1599,13 +2084,7 @@ class MainActivity : Activity() {
             ).apply {
 
                 gravity = Gravity.CENTER
-
-                setPadding(
-                    dp(15),
-                    dp(10),
-                    dp(15),
-                    dp(10)
-                )
+                setPadding(dp(15), dp(10), dp(15), dp(10))
 
                 background = rounded(
                     if (selected) purple else panel,
@@ -1614,25 +2093,21 @@ class MainActivity : Activity() {
                 )
 
                 setOnClickListener {
-
                     selectedCategory = category
                     page = "home"
-
                     renderCategories()
                     renderChannels()
                 }
             }
 
-            val params =
-                LinearLayout.LayoutParams(-2, -2)
-
+            val params = LinearLayout.LayoutParams(-2, -2)
             params.marginEnd = dp(8)
 
             categoryList.addView(chip, params)
         }
     }
 
-    // CHANNELS
+    // CHANNEL LIST
 
     private fun renderChannels() {
 
@@ -1645,9 +2120,7 @@ class MainActivity : Activity() {
             }
 
             "history" -> history.mapNotNull { url ->
-                channels.find {
-                    it.second == url
-                }
+                channels.find { it.second == url }
             }
 
             else -> channels.filter {
@@ -1676,12 +2149,7 @@ class MainActivity : Activity() {
                     muted
                 ).apply {
                     gravity = Gravity.CENTER
-                    setPadding(
-                        10,
-                        dp(35),
-                        10,
-                        dp(35)
-                    )
+                    setPadding(10, dp(35), 10, dp(35))
                 }
             )
         }
@@ -1697,12 +2165,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
 
-            setPadding(
-                dp(13),
-                dp(13),
-                dp(10),
-                dp(13)
-            )
+            setPadding(dp(13), dp(13), dp(10), dp(13))
 
             background = rounded(
                 panel,
@@ -1716,7 +2179,6 @@ class MainActivity : Activity() {
             textSize = 20f
             gravity = Gravity.CENTER
             setTextColor(white)
-
             background = rounded(
                 Color.rgb(85, 35, 145),
                 13,
@@ -1726,18 +2188,13 @@ class MainActivity : Activity() {
 
         card.addView(
             logo,
-            LinearLayout.LayoutParams(
-                dp(48),
-                dp(48)
-            )
+            LinearLayout.LayoutParams(dp(48), dp(48))
         )
 
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, dp(5), 0)
-
-            layoutParams =
-                LinearLayout.LayoutParams(0, -2, 1f)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
 
         info.addView(
@@ -1753,19 +2210,13 @@ class MainActivity : Activity() {
         card.addView(info)
 
         val favorite = label(
-            if (favorites.contains(channel.second)) "♥"
-            else "♡",
+            if (favorites.contains(channel.second)) "♥" else "♡",
             25f,
             red,
             true
         ).apply {
 
-            setPadding(
-                dp(10),
-                dp(8),
-                dp(8),
-                dp(8)
-            )
+            setPadding(dp(10), dp(8), dp(8), dp(8))
 
             setOnClickListener {
 
@@ -1774,10 +2225,7 @@ class MainActivity : Activity() {
                 }
 
                 prefs.edit()
-                    .putStringSet(
-                        "favorites",
-                        favorites.toSet()
-                    )
+                    .putStringSet("favorites", favorites.toSet())
                     .apply()
 
                 renderChannels()
@@ -1796,16 +2244,10 @@ class MainActivity : Activity() {
             }
 
             prefs.edit()
-                .putString(
-                    "history",
-                    history.joinToString("\n")
-                )
+                .putString("history", history.joinToString("\n"))
                 .apply()
 
-            val intent = Intent(
-                this,
-                PlayerActivity::class.java
-            )
+            val intent = Intent(this, PlayerActivity::class.java)
 
             intent.putExtra("url", channel.second)
             intent.putExtra("name", channel.first)
@@ -1813,17 +2255,29 @@ class MainActivity : Activity() {
             startActivity(intent)
         }
 
-        val params =
-            LinearLayout.LayoutParams(-1, -2)
-
+        val params = LinearLayout.LayoutParams(-1, -2)
         params.bottomMargin = dp(10)
-
         card.layoutParams = params
 
         return card
     }
 
-    // BACK BUTTON + EXIT CONFIRMATION
+    // COMMON HELPERS
+
+    private fun isValidHttpUrl(value: String): Boolean {
+        return value.startsWith("https://", true) ||
+            value.startsWith("http://", true)
+    }
+
+    private fun showError(message: String) {
+        Toast.makeText(
+            this,
+            message,
+            Toast.LENGTH_LONG
+        ).show()
+    }
+
+    // BACK BUTTON + EXIT
 
     @Deprecated("Legacy back callback")
     override fun onBackPressed() {
