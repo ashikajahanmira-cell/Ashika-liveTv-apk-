@@ -11,7 +11,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Rational
 import android.view.Gravity
-import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -20,17 +19,20 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerControlView
+import androidx.media3.ui.PlayerView
 
 class PlayerActivity : Activity() {
 
     private var player: ExoPlayer? = null
 
-    private lateinit var textureView: TextureView
+    private lateinit var playerView: PlayerView
     private lateinit var topControls: LinearLayout
     private lateinit var controlView: PlayerControlView
     private lateinit var statusText: TextView
@@ -64,6 +66,7 @@ class PlayerActivity : Activity() {
                 "Invalid video URL",
                 Toast.LENGTH_LONG
             ).show()
+
             finish()
             return
         }
@@ -80,20 +83,39 @@ class PlayerActivity : Activity() {
             setBackgroundColor(Color.BLACK)
         }
 
-        textureView = TextureView(this)
+        // PlayerView maintains the original video aspect ratio.
+        playerView = PlayerView(this).apply {
+
+            setBackgroundColor(Color.BLACK)
+
+            useController = false
+
+            resizeMode =
+                AspectRatioFrameLayout.RESIZE_MODE_FIT
+
+            setShowBuffering(
+                PlayerView.SHOW_BUFFERING_WHEN_PLAYING
+            )
+
+            setKeepContentOnPlayerReset(true)
+        }
 
         root.addView(
-            textureView,
+            playerView,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
 
+        // Top controls
         topControls = LinearLayout(this).apply {
+
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
+
             setPadding(8, 8, 8, 8)
+
             setBackgroundColor(0xCC170B2E.toInt())
         }
 
@@ -118,12 +140,18 @@ class PlayerActivity : Activity() {
             )
         )
 
+        // Loading / connection status
         statusText = TextView(this).apply {
+
             text = "Connecting..."
             textSize = 14f
+
             setTextColor(Color.WHITE)
+
             gravity = Gravity.CENTER
-            setPadding(12, 8, 12, 8)
+
+            setPadding(16, 10, 16, 10)
+
             setBackgroundColor(0xAA170B2E.toInt())
         }
 
@@ -136,8 +164,11 @@ class PlayerActivity : Activity() {
             )
         )
 
+        // Playback controls
         controlView = PlayerControlView(this).apply {
+
             setShowTimeoutMs(4000)
+
             setShowPreviousButton(false)
             setShowNextButton(false)
         }
@@ -162,82 +193,110 @@ class PlayerActivity : Activity() {
             .build()
             .also { exoPlayer ->
 
-                exoPlayer.setVideoTextureView(textureView)
-
-                exoPlayer.setMediaItem(mediaItem)
+                playerView.player = exoPlayer
 
                 controlView.player = exoPlayer
 
-                exoPlayer.addListener(object : Player.Listener {
+                exoPlayer.setMediaItem(mediaItem)
 
-                    override fun onPlaybackStateChanged(
-                        playbackState: Int
-                    ) {
+                exoPlayer.addListener(
+                    object : Player.Listener {
 
-                        when (playbackState) {
+                        override fun onPlaybackStateChanged(
+                            playbackState: Int
+                        ) {
 
-                            Player.STATE_BUFFERING -> {
-                                statusText.visibility = View.VISIBLE
-                                statusText.text = "Loading video..."
-                            }
+                            when (playbackState) {
 
-                            Player.STATE_READY -> {
-                                if (exoPlayer.isPlaying) {
-                                    statusText.visibility = View.GONE
-                                } else if (exoPlayer.playWhenReady) {
-                                    statusText.visibility = View.VISIBLE
-                                    statusText.text = "Starting video..."
+                                Player.STATE_BUFFERING -> {
+
+                                    statusText.visibility =
+                                        View.VISIBLE
+
+                                    statusText.text =
+                                        "Loading video..."
                                 }
-                            }
 
-                            Player.STATE_ENDED -> {
-                                startAutoReconnect()
-                            }
+                                Player.STATE_READY -> {
 
-                            Player.STATE_IDLE -> {
-                                if (!retryPending) {
-                                    statusText.visibility = View.VISIBLE
-                                    statusText.text = "Waiting..."
+                                    if (exoPlayer.isPlaying) {
+
+                                        statusText.visibility =
+                                            View.GONE
+
+                                    } else if (
+                                        exoPlayer.playWhenReady
+                                    ) {
+
+                                        statusText.visibility =
+                                            View.VISIBLE
+
+                                        statusText.text =
+                                            "Starting video..."
+                                    }
+                                }
+
+                                Player.STATE_ENDED -> {
+                                    startAutoReconnect()
+                                }
+
+                                Player.STATE_IDLE -> {
+
+                                    if (!retryPending) {
+
+                                        statusText.visibility =
+                                            View.VISIBLE
+
+                                        statusText.text =
+                                            "Waiting..."
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    override fun onIsPlayingChanged(
-                        isPlaying: Boolean
-                    ) {
+                        override fun onIsPlayingChanged(
+                            isPlaying: Boolean
+                        ) {
 
-                        if (isPlaying) {
+                            if (isPlaying) {
 
-                            window.addFlags(
-                                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                            )
+                                window.addFlags(
+                                    WindowManager.LayoutParams
+                                        .FLAG_KEEP_SCREEN_ON
+                                )
 
-                            statusText.visibility = View.GONE
+                                statusText.visibility =
+                                    View.GONE
 
-                            retryCount = 0
-                            cancelReconnect()
+                                retryCount = 0
 
-                        } else {
+                                cancelReconnect()
 
-                            window.clearFlags(
-                                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                            )
+                            } else {
+
+                                window.clearFlags(
+                                    WindowManager.LayoutParams
+                                        .FLAG_KEEP_SCREEN_ON
+                                )
+                            }
+                        }
+
+                        override fun onPlayerError(
+                            error: PlaybackException
+                        ) {
+
+                            startAutoReconnect()
                         }
                     }
-
-                    override fun onPlayerError(
-                        error: PlaybackException
-                    ) {
-                        startAutoReconnect()
-                    }
-                })
+                )
 
                 exoPlayer.prepare()
+
                 exoPlayer.playWhenReady = true
             }
     }
 
+    // Automatic reconnection
     private fun startAutoReconnect() {
 
         if (isFinishing || isDestroyed) return
@@ -256,7 +315,9 @@ class PlayerActivity : Activity() {
         retryPending = true
 
         statusText.visibility = View.VISIBLE
-        statusText.text = "Reconnecting... ($retryCount)"
+
+        statusText.text =
+            "Reconnecting... ($retryCount)"
 
         retryRunnable?.let {
             handler.removeCallbacks(it)
@@ -267,16 +328,18 @@ class PlayerActivity : Activity() {
             retryPending = false
             retryRunnable = null
 
-            if (isFinishing || isDestroyed) return@Runnable
+            if (isFinishing || isDestroyed) {
+                return@Runnable
+            }
 
-            val currentPlayer = player
-
-            if (currentPlayer == null) return@Runnable
+            val currentPlayer = player ?: return@Runnable
 
             try {
 
                 currentPlayer.stop()
+
                 currentPlayer.prepare()
+
                 currentPlayer.playWhenReady = true
 
             } catch (e: Exception) {
@@ -300,6 +363,7 @@ class PlayerActivity : Activity() {
         retryPending = false
     }
 
+    // Purple theme buttons
     private fun makeButton(
         text: String,
         action: () -> Unit
@@ -308,8 +372,11 @@ class PlayerActivity : Activity() {
         return TextView(this).apply {
 
             this.text = text
+
             textSize = 13f
+
             setTextColor(Color.WHITE)
+
             gravity = Gravity.CENTER
 
             setPadding(18, 15, 18, 15)
@@ -327,11 +394,13 @@ class PlayerActivity : Activity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
+
                 setMargins(6, 4, 6, 4)
             }
         }
     }
 
+    // Fullscreen
     private fun toggleFullscreen() {
 
         fullscreen = !fullscreen
@@ -351,6 +420,7 @@ class PlayerActivity : Activity() {
         applyFullscreen()
     }
 
+    // Popup / Picture in Picture
     private fun openPictureInPicture() {
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -382,6 +452,7 @@ class PlayerActivity : Activity() {
         }
     }
 
+    // System bars
     private fun applyFullscreen() {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -408,7 +479,10 @@ class PlayerActivity : Activity() {
             @Suppress("DEPRECATION")
 
             window.decorView.systemUiVisibility =
-                if (fullscreen && !isInPictureInPictureMode) {
+                if (
+                    fullscreen &&
+                    !isInPictureInPictureMode
+                ) {
 
                     View.SYSTEM_UI_FLAG_FULLSCREEN or
                     View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -444,12 +518,18 @@ class PlayerActivity : Activity() {
         )
 
         topControls.visibility =
-            if (isInPictureInPictureMode) View.GONE
-            else View.VISIBLE
+            if (isInPictureInPictureMode) {
+                View.GONE
+            } else {
+                View.VISIBLE
+            }
 
         controlView.visibility =
-            if (isInPictureInPictureMode) View.GONE
-            else View.VISIBLE
+            if (isInPictureInPictureMode) {
+                View.GONE
+            } else {
+                View.VISIBLE
+            }
 
         if (isInPictureInPictureMode) {
             statusText.visibility = View.GONE
@@ -497,6 +577,10 @@ class PlayerActivity : Activity() {
 
         if (::controlView.isInitialized) {
             controlView.player = null
+        }
+
+        if (::playerView.isInitialized) {
+            playerView.player = null
         }
 
         window.clearFlags(
