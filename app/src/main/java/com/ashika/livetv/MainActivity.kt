@@ -14,14 +14,10 @@ import android.text.TextWatcher
 import android.text.Editable
 import android.content.Intent
 import android.content.SharedPreferences
-import kotlin.concurrent.thread
-import java.net.HttpURLConnection
-import java.net.URL
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 
 class MainActivity : Activity() {
-
-    private val playlist =
-        "https://raw.githubusercontent.com/abusaeeidx/Mrgify-BDIX-IPTV/main/playlist.m3u"
 
     private val bg = Color.rgb(7, 12, 25)
     private val panel = Color.rgb(16, 27, 47)
@@ -43,6 +39,8 @@ class MainActivity : Activity() {
 
     private val favorites = mutableSetOf<String>()
     private val history = mutableListOf<String>()
+
+    private var channelsListener: ListenerRegistration? = null
 
     private var selectedCategory = "All"
     private var page = "home"
@@ -143,7 +141,6 @@ class MainActivity : Activity() {
 
         root.addView(header)
 
-        // Hero banner
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(22), dp(20), dp(20))
@@ -170,6 +167,7 @@ class MainActivity : Activity() {
         val heroButton = button("▶   Explore Channels") {
             page = "home"
             selectedCategory = "All"
+            renderCategories()
             renderChannels()
         }
 
@@ -181,7 +179,6 @@ class MainActivity : Activity() {
         heroParamsOuter.topMargin = dp(18)
         root.addView(hero, heroParamsOuter)
 
-        // Section heading
         val section = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -224,7 +221,7 @@ class MainActivity : Activity() {
         catParams.topMargin = dp(13)
         root.addView(categoryScroll, catParams)
 
-        status = label("Loading channels...", 12f, muted)
+        status = label("Connecting to Firebase...", 12f, muted)
         status.setPadding(0, dp(13), 0, dp(8))
         root.addView(status)
 
@@ -259,10 +256,6 @@ class MainActivity : Activity() {
             )
         )
 
-        outer.setOnClickListener {
-            drawer.visibility = View.GONE
-        }
-
         drawer.setOnClickListener { }
 
         setContentView(outer)
@@ -292,12 +285,14 @@ class MainActivity : Activity() {
         addDrawerItem("🏠   Home") {
             page = "home"
             selectedCategory = "All"
+            renderCategories()
             renderChannels()
         }
 
         addDrawerItem("📺   All Channels") {
             page = "home"
             selectedCategory = "All"
+            renderCategories()
             renderChannels()
         }
 
@@ -311,7 +306,7 @@ class MainActivity : Activity() {
             renderChannels()
         }
 
-        addDrawerItem("🔄   Refresh Playlist") {
+        addDrawerItem("🔄   Refresh Channels") {
             loadChannels()
         }
 
@@ -320,7 +315,7 @@ class MainActivity : Activity() {
                 .setTitle("Ashika Live TV Settings")
                 .setMessage(
                     "Premium Dark Theme\n" +
-                    "Playlist: Online M3U\n" +
+                    "Source: Firebase Cloud\n" +
                     "Channels: ${channels.size}"
                 )
                 .setPositiveButton("OK", null)
@@ -362,71 +357,58 @@ class MainActivity : Activity() {
         )
     }
 
+    // FIREBASE AUTOMATIC LIVE SYNC
+
     private fun loadChannels() {
-        status.text = "Connecting to playlist..."
 
-        thread {
-            try {
-                val connection =
-                    URL(playlist).openConnection() as HttpURLConnection
+        channelsListener?.remove()
+        channelsListener = null
 
-                connection.connectTimeout = 20000
-                connection.readTimeout = 30000
-                connection.setRequestProperty(
-                    "User-Agent", "AshikaLiveTV/2.0"
-                )
+        status.text = "Connecting to Firebase..."
 
-                val lines = connection.inputStream.bufferedReader().use {
-                    it.readLines()
+        channelsListener = FirebaseFirestore.getInstance()
+            .collection("channels")
+            .whereEqualTo("enabled", true)
+            .addSnapshotListener { snapshot, error ->
+
+                if (error != null) {
+                    status.text = "Firebase error: ${error.message}"
+                    return@addSnapshotListener
                 }
 
-                connection.disconnect()
+                if (snapshot == null) return@addSnapshotListener
 
                 val loaded =
                     mutableListOf<Triple<String, String, String>>()
 
-                var name = "Live Channel"
-                var category = "Other"
+                snapshot.documents.forEach { doc ->
 
-                lines.forEach { line ->
-                    when {
-                        line.startsWith("#EXTINF", true) -> {
-                            name = line.substringAfterLast(",")
-                                .trim().ifBlank { "Live Channel" }
+                    val name = doc.getString("name")
+                    val url = doc.getString("url")
+                    val category = doc.getString("category") ?: "Other"
 
-                            val group = Regex(
-                                """group-title="([^"]*)""""
-                            ).find(line)
-
-                            category = group?.groupValues?.get(1)
-                                ?: "Other"
-                        }
-
-                        line.startsWith("http://") ||
-                        line.startsWith("https://") -> {
-                            loaded.add(
-                                Triple(name, line.trim(), category)
-                            )
-                            name = "Live Channel"
-                            category = "Other"
-                        }
+                    if (!name.isNullOrBlank() && !url.isNullOrBlank()) {
+                        loaded.add(
+                            Triple(name, url, category)
+                        )
                     }
                 }
 
-                runOnUiThread {
-                    channels.clear()
-                    channels.addAll(loaded)
-                    status.text = "${channels.size} CHANNELS AVAILABLE"
-                    renderCategories()
-                    renderChannels()
+                channels.clear()
+                channels.addAll(loaded)
+
+                if (
+                    selectedCategory != "All" &&
+                    channels.none { it.third == selectedCategory }
+                ) {
+                    selectedCategory = "All"
                 }
 
-            } catch (e: Exception) {
-                runOnUiThread {
-                    status.text = "Playlist loading failed. Check internet."
-                }
+                status.text = "${channels.size} CHANNELS AVAILABLE"
+
+                renderCategories()
+                renderChannels()
             }
-        }
     }
 
     private fun renderCategories() {
@@ -436,6 +418,7 @@ class MainActivity : Activity() {
             channels.map { it.third }.distinct().sorted()
 
         categories.forEach { category ->
+
             val selected = selectedCategory == category
 
             val chip = label(
@@ -450,6 +433,7 @@ class MainActivity : Activity() {
                     if (selected) blue else panel,
                     20
                 )
+
                 setOnClickListener {
                     selectedCategory = category
                     page = "home"
@@ -468,6 +452,7 @@ class MainActivity : Activity() {
         channelList.removeAllViews()
 
         val filtered = when (page) {
+
             "favorites" -> channels.filter {
                 favorites.contains(it.second)
             }
@@ -480,6 +465,7 @@ class MainActivity : Activity() {
                 selectedCategory == "All" ||
                 it.third == selectedCategory
             }
+
         }.filter {
             it.first.contains(query, true)
         }
@@ -489,6 +475,7 @@ class MainActivity : Activity() {
         }
 
         if (filtered.isEmpty()) {
+
             val empty = label(
                 if (page == "favorites") "No favorites yet"
                 else if (page == "history") "No recently watched channels"
@@ -507,6 +494,7 @@ class MainActivity : Activity() {
     private fun createChannelCard(
         channel: Triple<String, String, String>
     ): View {
+
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -553,8 +541,11 @@ class MainActivity : Activity() {
             red,
             true
         ).apply {
+
             setPadding(dp(10), dp(8), dp(8), dp(8))
+
             setOnClickListener {
+
                 if (!favorites.add(channel.second)) {
                     favorites.remove(channel.second)
                 }
@@ -570,6 +561,7 @@ class MainActivity : Activity() {
         card.addView(favorite)
 
         card.setOnClickListener {
+
             history.remove(channel.second)
             history.add(0, channel.second)
 
@@ -603,5 +595,11 @@ class MainActivity : Activity() {
         } else {
             super.onBackPressed()
         }
+    }
+
+    override fun onDestroy() {
+        channelsListener?.remove()
+        channelsListener = null
+        super.onDestroy()
     }
 }
