@@ -20,18 +20,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Check Gradle Projects
+      - name: Show Project Files
         run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon projects
+          echo "PROJECT FILES"
+          find . -maxdepth 3 -type f | sort
 
-      - name: Check App Tasks
+      - name: Show Gradle Configuration
         run: |
-          ./gradlew --no-daemon :app:tasks --all
+          echo "ROOT BUILD FILE"
+          cat build.gradle.kts
+          echo "APP BUILD FILE"
+          cat app/build.gradle.kts
+          echo "SETTINGS FILE"
+          cat settings.gradle.kts
 
       - name: Build APK
         run: |
-          ./gradlew --no-daemon :app:assembleDebug
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
