@@ -11,7 +11,10 @@
 
         <activity
             android:name=".PlayerActivity"
-            android:exported="false"/>
+            android:exported="false"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"/>
 
         <activity
             android:name=".MainActivity"
