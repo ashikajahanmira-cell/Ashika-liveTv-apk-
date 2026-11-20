@@ -6,15 +6,17 @@
     <application
         android:allowBackup="true"
         android:label="Ashika Live TV"
+        android:icon="@drawable/ashika_logo"
+        android:roundIcon="@drawable/ashika_logo"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="true">
 
         <activity
-    android:name=".PlayerActivity"
-    android:exported="false"
-    android:supportsPictureInPicture="true"
-    android:resizeableActivity="true"
-    android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"/>
+            android:name=".PlayerActivity"
+            android:exported="false"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"/>
 
         <activity
             android:name=".MainActivity"
