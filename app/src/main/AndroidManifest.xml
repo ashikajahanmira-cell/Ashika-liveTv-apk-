@@ -16,6 +16,7 @@
             android:exported="false"
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true"
+            android:screenOrientation="sensorLandscape"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"/>
 
         <activity
