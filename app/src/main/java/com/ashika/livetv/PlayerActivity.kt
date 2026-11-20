@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import android.view.Gravity
+import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -17,13 +18,14 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
+import androidx.media3.ui.PlayerControlView
 
 class PlayerActivity : Activity() {
 
     private var player: ExoPlayer? = null
-    private lateinit var playerView: PlayerView
+    private lateinit var textureView: TextureView
     private lateinit var topControls: LinearLayout
+    private lateinit var controlView: PlayerControlView
     private var fullscreen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -43,21 +45,18 @@ class PlayerActivity : Activity() {
             setBackgroundColor(Color.BLACK)
         }
 
-        playerView = PlayerView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-            useController = true
-        }
+        textureView = TextureView(this)
 
-        root.addView(playerView)
+        root.addView(textureView, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        ))
 
         topControls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(8, 8, 8, 8)
-            setBackgroundColor(0x99000000.toInt())
+            setBackgroundColor(0xCC101B30.toInt())
         }
 
         topControls.addView(makeButton("POPUP") {
@@ -65,38 +64,45 @@ class PlayerActivity : Activity() {
         })
 
         topControls.addView(makeButton("FULL SCREEN") {
-            toggleFullscreen()
+            fullscreen = !fullscreen
+            applyFullscreen()
         })
 
-        val controlsParams = FrameLayout.LayoutParams(
+        root.addView(topControls, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.TOP or Gravity.END
-        )
+        ))
 
-        root.addView(topControls, controlsParams)
+        controlView = PlayerControlView(this).apply {
+            setShowTimeoutMs(4000)
+        }
+
+        root.addView(controlView, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM
+        ))
+
         setContentView(root)
 
-        try {
-            player = ExoPlayer.Builder(this).build().also {
-                playerView.player = it
-                it.setMediaItem(MediaItem.fromUri(videoUrl))
-                it.prepare()
-                it.playWhenReady = true
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Player error: ${e.message}", Toast.LENGTH_LONG).show()
+        player = ExoPlayer.Builder(this).build().also {
+            it.setVideoTextureView(textureView)
+            it.setMediaItem(MediaItem.fromUri(videoUrl))
+            controlView.player = it
+            it.prepare()
+            it.playWhenReady = true
         }
     }
 
     private fun makeButton(text: String, action: () -> Unit): TextView {
         return TextView(this).apply {
             this.text = text
-            textSize = 13f
+            textSize = 14f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
-            setPadding(18, 14, 18, 14)
-            setBackgroundColor(0xFF26364F.toInt())
+            setPadding(18, 15, 18, 15)
+            setBackgroundColor(0xFF1769AA.toInt())
             isClickable = true
             isFocusable = true
             setOnClickListener { action() }
@@ -105,14 +111,14 @@ class PlayerActivity : Activity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(5, 0, 5, 0)
+                setMargins(6, 4, 6, 4)
             }
         }
     }
 
     private fun openPictureInPicture() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            Toast.makeText(this, "Popup requires Android 8.0+", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Android 8.0 or newer required", Toast.LENGTH_LONG).show()
             return
         }
 
@@ -123,13 +129,8 @@ class PlayerActivity : Activity() {
 
             enterPictureInPictureMode(params)
         } catch (e: Exception) {
-            Toast.makeText(this, "Popup unavailable: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Popup error: ${e.message}", Toast.LENGTH_LONG).show()
         }
-    }
-
-    private fun toggleFullscreen() {
-        fullscreen = !fullscreen
-        applyFullscreen()
     }
 
     private fun applyFullscreen() {
@@ -171,35 +172,19 @@ class PlayerActivity : Activity() {
         topControls.visibility =
             if (isInPictureInPictureMode) View.GONE else View.VISIBLE
 
-        playerView.useController = !isInPictureInPictureMode
+        controlView.visibility =
+            if (isInPictureInPictureMode) View.GONE else View.VISIBLE
 
-        if (!isInPictureInPictureMode) {
-            applyFullscreen()
-        }
-    }
-
-    @Deprecated("Deprecated in Android")
-    override fun onBackPressed() {
-        if (fullscreen) {
-            fullscreen = false
-            applyFullscreen()
-        } else {
-            super.onBackPressed()
-        }
+        if (!isInPictureInPictureMode) applyFullscreen()
     }
 
     override fun onStop() {
         super.onStop()
-        if (!isInPictureInPictureMode) {
-            player?.pause()
-        }
+        if (!isInPictureInPictureMode) player?.pause()
     }
 
     override fun onDestroy() {
-        if (::playerView.isInitialized) {
-            playerView.player = null
-        }
-
+        controlView.player = null
         player?.release()
         player = null
         super.onDestroy()
