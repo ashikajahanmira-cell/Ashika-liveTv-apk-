@@ -19,6 +19,8 @@ import android.speech.RecognizerIntent
 import android.widget.*
 import android.text.TextWatcher
 import android.text.Editable
+import android.text.InputType
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.net.HttpURLConnection
@@ -27,6 +29,11 @@ import java.util.Locale
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
+
+    // FIREBASE ADMIN UID
+
+    private val ADMIN_UID =
+        "qVzYexoF4wcm7IBByOoA9yKeDy82"
 
     private val bg = Color.rgb(8, 5, 20)
     private val panel = Color.rgb(25, 15, 45)
@@ -786,7 +793,7 @@ class MainActivity : Activity() {
 
         val input = EditText(this).apply {
             hint = "Enter new 4-8 digit PIN"
-            inputType = 2
+            inputType = InputType.TYPE_CLASS_NUMBER
             setTextColor(white)
             setHintTextColor(muted)
         }
@@ -846,7 +853,7 @@ class MainActivity : Activity() {
 
         val input = EditText(this).apply {
             hint = "Enter your PIN"
-            inputType = 2
+            inputType = InputType.TYPE_CLASS_NUMBER
             setTextColor(white)
             setHintTextColor(muted)
         }
@@ -879,7 +886,7 @@ class MainActivity : Activity() {
         dialog.show()
     }
 
-    // ADMIN PANEL
+    // ADMIN PANEL + FIREBASE AUTHENTICATION
 
     private fun showAdminPanel() {
 
@@ -903,7 +910,7 @@ class MainActivity : Activity() {
 
         val input = EditText(this).apply {
             hint = "Admin PIN"
-            inputType = 2
+            inputType = InputType.TYPE_CLASS_NUMBER
             setTextColor(white)
             setHintTextColor(muted)
         }
@@ -915,7 +922,7 @@ class MainActivity : Activity() {
             .setPositiveButton("Continue") { _, _ ->
 
                 if (input.text.toString() == savedPin) {
-                    openAdminOptions()
+                    showFirebaseAdminLogin()
                 } else {
                     Toast.makeText(
                         this,
@@ -928,12 +935,154 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun showFirebaseAdminLogin() {
+
+        val email = EditText(this).apply {
+            hint = "Admin Email"
+            inputType =
+                InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setSingleLine(true)
+            setTextColor(white)
+            setHintTextColor(muted)
+        }
+
+        val password = EditText(this).apply {
+            hint = "Admin Password"
+            inputType =
+                InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+            setTextColor(white)
+            setHintTextColor(muted)
+        }
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(22), dp(10), dp(22), dp(5))
+            addView(email)
+            addView(password)
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("🔐 Firebase Admin Login")
+            .setMessage(
+                "Enter your Firebase Admin Email and Password."
+            )
+            .setView(box)
+            .setPositiveButton("Login", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnShowListener {
+
+            val loginButton = dialog.getButton(
+                AlertDialog.BUTTON_POSITIVE
+            )
+
+            loginButton.setOnClickListener {
+
+                val adminEmail =
+                    email.text.toString().trim()
+
+                val adminPassword =
+                    password.text.toString()
+
+                if (adminEmail.isBlank()) {
+                    email.error = "Enter Admin Email"
+                    return@setOnClickListener
+                }
+
+                if (adminPassword.isBlank()) {
+                    password.error = "Enter Admin Password"
+                    return@setOnClickListener
+                }
+
+                loginButton.isEnabled = false
+                loginButton.text = "Signing in..."
+
+                FirebaseAuth.getInstance()
+                    .signInWithEmailAndPassword(
+                        adminEmail,
+                        adminPassword
+                    )
+                    .addOnCompleteListener { task ->
+
+                        if (task.isSuccessful) {
+
+                            val user = FirebaseAuth
+                                .getInstance()
+                                .currentUser
+
+                            if (user?.uid == ADMIN_UID) {
+
+                                dialog.dismiss()
+
+                                Toast.makeText(
+                                    this,
+                                    "Admin Login Successful",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+
+                                openAdminOptions()
+
+                            } else {
+
+                                FirebaseAuth.getInstance().signOut()
+
+                                loginButton.isEnabled = true
+                                loginButton.text = "Login"
+
+                                Toast.makeText(
+                                    this,
+                                    "Access Denied: Admin UID does not match",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+
+                        } else {
+
+                            loginButton.isEnabled = true
+                            loginButton.text = "Login"
+
+                            Toast.makeText(
+                                this,
+                                "Login Failed: ${
+                                    task.exception?.message
+                                        ?: "Unknown error"
+                                }",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+            }
+        }
+
+        dialog.show()
+    }
+
     private fun openAdminOptions() {
+
+        val currentUid = FirebaseAuth
+            .getInstance()
+            .currentUser?.uid
+
+        if (currentUid != ADMIN_UID) {
+
+            Toast.makeText(
+                this,
+                "Admin authentication required",
+                Toast.LENGTH_LONG
+            ).show()
+
+            return
+        }
 
         val options = arrayOf(
             "Add Channel",
             "Refresh Channels",
-            "View Channel Count"
+            "View Channel Count",
+            "Admin Logout"
         )
 
         AlertDialog.Builder(this)
@@ -952,12 +1101,37 @@ class MainActivity : Activity() {
                         )
                         .setPositiveButton("OK", null)
                         .show()
+
+                    3 -> {
+
+                        FirebaseAuth.getInstance().signOut()
+
+                        Toast.makeText(
+                            this,
+                            "Admin Logged Out",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
             }
             .show()
     }
 
+    // ADD CHANNEL
+
     private fun addAdminChannel() {
+
+        if (
+            FirebaseAuth.getInstance()
+                .currentUser?.uid != ADMIN_UID
+        ) {
+            Toast.makeText(
+                this,
+                "Admin login required",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
 
         val name = EditText(this).apply {
             hint = "Channel name"
@@ -1018,6 +1192,18 @@ class MainActivity : Activity() {
                         Toast.LENGTH_LONG
                     ).show()
 
+                    return@setPositiveButton
+                }
+
+                if (
+                    FirebaseAuth.getInstance()
+                        .currentUser?.uid != ADMIN_UID
+                ) {
+                    Toast.makeText(
+                        this,
+                        "Admin session expired. Login again.",
+                        Toast.LENGTH_LONG
+                    ).show()
                     return@setPositiveButton
                 }
 
