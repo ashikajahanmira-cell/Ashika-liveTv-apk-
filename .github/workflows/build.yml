@@ -1,3 +1,4 @@
+
 name: Build Ashika Live TV
 
 on:
@@ -27,7 +28,6 @@ jobs:
           mkdir -p "$HOME/.android"
           echo "$KEYSTORE_BASE64" | base64 --decode \
             > "$HOME/.android/debug.keystore"
-
           test -s "$HOME/.android/debug.keystore"
 
       - name: Build APK
@@ -42,6 +42,16 @@ jobs:
             -alias androiddebugkey \
             -storepass android \
             -keypass android
+
+      - name: Verify APK Signature
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          test -n "$APK"
+          echo "Checking: $APK"
+
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
