@@ -20,19 +20,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Show Project Files
+      - name: Generate Debug Keystore
         run: |
-          echo "PROJECT FILES"
-          find . -maxdepth 3 -type f | sort
-
-      - name: Show Gradle Configuration
-        run: |
-          echo "ROOT BUILD FILE"
-          cat build.gradle.kts
-          echo "APP BUILD FILE"
-          cat app/build.gradle.kts
-          echo "SETTINGS FILE"
-          cat settings.gradle.kts
+          mkdir -p "$HOME/.android"
+          keytool -genkeypair -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
 
       - name: Build APK
         run: |
