@@ -18,8 +18,6 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import java.net.HttpURLConnection
 import java.net.URL
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
@@ -42,6 +40,9 @@ class MainActivity : Activity() {
     private val channels =
         mutableListOf<Triple<String, String, String>>()
 
+    private val manualChannels =
+        mutableListOf<Triple<String, String, String>>()
+
     private val playlistChannels =
         mutableListOf<Triple<String, String, String>>()
 
@@ -55,7 +56,6 @@ class MainActivity : Activity() {
     private var page = "home"
     private var query = ""
 
-    private var lastPlaylistUrl = ""
     private var playlistRequestId = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -167,11 +167,13 @@ class MainActivity : Activity() {
         }
 
         hero.addView(label("WELCOME TO", 11f, 0xFFBFD6FF.toInt(), true))
+
         hero.addView(
             label("ASHIKA LIVE TV", 25f, white, true).apply {
                 setPadding(0, dp(7), 0, dp(5))
             }
         )
+
         hero.addView(
             label("Your entertainment. One destination.", 12f, 0xFFD4E2FF.toInt())
         )
@@ -203,12 +205,12 @@ class MainActivity : Activity() {
         )
 
         val refresh = label("↻ Refresh", 13f, 0xFF82B5FF.toInt(), true)
+
         refresh.setOnClickListener {
-            lastPlaylistUrl = ""
             loadChannels()
         }
-        section.addView(refresh)
 
+        section.addView(refresh)
         root.addView(section)
 
         search = EditText(this).apply {
@@ -322,7 +324,6 @@ class MainActivity : Activity() {
         }
 
         addDrawerItem("🔄   Refresh Channels") {
-            lastPlaylistUrl = ""
             loadChannels()
         }
 
@@ -331,7 +332,7 @@ class MainActivity : Activity() {
                 .setTitle("Ashika Live TV Settings")
                 .setMessage(
                     "Premium Dark Theme\n" +
-                    "Source: Firebase + M3U Playlist\n" +
+                    "Source: Firebase + Multiple M3U Playlists\n" +
                     "Channels: ${channels.size}"
                 )
                 .setPositiveButton("OK", null)
@@ -373,7 +374,7 @@ class MainActivity : Activity() {
         )
     }
 
-    // FIREBASE CHANNELS + PLAYLIST
+    // FIREBASE CHANNELS + MULTIPLE PLAYLISTS
 
     private fun loadChannels() {
         channelsListener?.remove()
@@ -382,11 +383,13 @@ class MainActivity : Activity() {
         channelsListener = null
         playlistListener = null
 
+        playlistRequestId++
+
         status.text = "Connecting to Firebase..."
 
         val db = FirebaseFirestore.getInstance()
 
-        // Individual channels from Admin Panel
+        // MANUAL CHANNELS
 
         channelsListener = db.collection("channels")
             .whereEqualTo("enabled", true)
@@ -399,8 +402,7 @@ class MainActivity : Activity() {
 
                 if (snapshot == null) return@addSnapshotListener
 
-                val loaded =
-                    mutableListOf<Triple<String, String, String>>()
+                manualChannels.clear()
 
                 snapshot.documents.forEach { doc ->
 
@@ -409,17 +411,16 @@ class MainActivity : Activity() {
                     val category = doc.getString("category") ?: "Other"
 
                     if (!name.isNullOrBlank() && !url.isNullOrBlank()) {
-                        loaded.add(Triple(name, url, category))
+                        manualChannels.add(
+                            Triple(name, url, category)
+                        )
                     }
                 }
-
-                channels.clear()
-                channels.addAll(loaded)
 
                 updateCombinedChannels()
             }
 
-        // Playlist URL from Admin Panel
+        // MULTIPLE PLAYLISTS
 
         playlistListener = db.collection("settings")
             .document("playlist")
@@ -431,54 +432,80 @@ class MainActivity : Activity() {
                 }
 
                 if (snapshot == null || !snapshot.exists()) {
-                    lastPlaylistUrl = ""
                     playlistRequestId++
                     playlistChannels.clear()
                     updateCombinedChannels()
                     return@addSnapshotListener
                 }
 
-                val enabled = snapshot.getBoolean("enabled") == true
-                val playlistUrl = snapshot.getString("url")?.trim().orEmpty()
+                val playlistItems =
+                    mutableListOf<Pair<String, String>>()
 
-                if (!enabled || playlistUrl.isBlank()) {
-                    lastPlaylistUrl = ""
-                    playlistRequestId++
-                    playlistChannels.clear()
-                    updateCombinedChannels()
-                    return@addSnapshotListener
+                val savedPlaylists =
+                    snapshot.get("playlists") as? List<*>
+
+                if (savedPlaylists != null) {
+
+                    savedPlaylists.forEach { item ->
+
+                        val data = item as? Map<*, *>
+                            ?: return@forEach
+
+                        val name =
+                            data["name"] as? String ?: "Playlist"
+
+                        val url =
+                            data["url"] as? String ?: ""
+
+                        val enabled =
+                            data["enabled"] == true
+
+                        if (enabled && url.isNotBlank()) {
+                            playlistItems.add(name to url)
+                        }
+                    }
+
+                } else {
+
+                    // OLD SINGLE PLAYLIST SUPPORT
+
+                    val oldUrl =
+                        snapshot.getString("url")?.trim().orEmpty()
+
+                    val oldEnabled =
+                        snapshot.getBoolean("enabled") == true
+
+                    if (oldEnabled && oldUrl.isNotBlank()) {
+                        playlistItems.add("Old Playlist" to oldUrl)
+                    }
                 }
 
-                if (playlistUrl != lastPlaylistUrl) {
-                    lastPlaylistUrl = playlistUrl
-                    downloadPlaylist(playlistUrl)
-                }
+                downloadMultiplePlaylists(playlistItems)
             }
     }
 
+    // MERGE CHANNELS WITHOUT DUPLICATES
+
     private fun updateCombinedChannels() {
+
         val combined =
             mutableListOf<Triple<String, String, String>>()
 
         val usedUrls = mutableSetOf<String>()
 
-        // Manual Firebase channels first
+        manualChannels.forEach { channel ->
 
-        channels.forEach { channel ->
             if (usedUrls.add(channel.second)) {
                 combined.add(channel)
             }
         }
-
-        // Then M3U playlist channels
 
         playlistChannels.forEach { channel ->
+
             if (usedUrls.add(channel.second)) {
                 combined.add(channel)
             }
         }
-
-        val oldCategory = selectedCategory
 
         channels.clear()
         channels.addAll(combined)
@@ -496,71 +523,125 @@ class MainActivity : Activity() {
         renderChannels()
     }
 
-    // DOWNLOAD M3U PLAYLIST IN BACKGROUND
+    // DOWNLOAD MULTIPLE M3U PLAYLISTS
 
-    private fun downloadPlaylist(playlistUrl: String) {
+    private fun downloadMultiplePlaylists(
+        playlistItems: List<Pair<String, String>>
+    ) {
+
         playlistRequestId++
         val requestId = playlistRequestId
 
-        status.text = "Downloading M3U playlist..."
+        if (playlistItems.isEmpty()) {
+
+            playlistChannels.clear()
+            updateCombinedChannels()
+
+            status.text = "${channels.size} CHANNELS AVAILABLE"
+            return
+        }
+
+        playlistChannels.clear()
+        updateCombinedChannels()
+
+        status.text =
+            "Downloading ${playlistItems.size} playlists..."
 
         thread {
-            var connection: HttpURLConnection? = null
 
-            try {
-                connection = URL(playlistUrl)
-                    .openConnection() as HttpURLConnection
+            val allChannels =
+                mutableListOf<Triple<String, String, String>>()
 
-                connection.connectTimeout = 15000
-                connection.readTimeout = 20000
-                connection.requestMethod = "GET"
-                connection.setRequestProperty(
-                    "User-Agent",
-                    "AshikaLiveTV/1.0"
-                )
+            val errors = mutableListOf<String>()
 
-                connection.connect()
+            playlistItems.forEach { playlist ->
 
-                val responseCode = connection.responseCode
+                val playlistName = playlist.first
+                val playlistUrl = playlist.second
 
-                if (responseCode !in 200..299) {
-                    throw Exception("HTTP error: $responseCode")
-                }
+                var connection: HttpURLConnection? = null
 
-                val content = BufferedReader(
-                    InputStreamReader(connection.inputStream, Charsets.UTF_8)
-                ).use { reader ->
-                    reader.readText()
-                }
+                try {
 
-                val parsed = parseM3U(content)
+                    connection = URL(playlistUrl)
+                        .openConnection() as HttpURLConnection
 
-                runOnUiThread {
-                    if (isFinishing || requestId != playlistRequestId) {
-                        return@runOnUiThread
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 20000
+                    connection.requestMethod = "GET"
+
+                    connection.setRequestProperty(
+                        "User-Agent",
+                        "AshikaLiveTV/1.0"
+                    )
+
+                    connection.connect()
+
+                    val responseCode = connection.responseCode
+
+                    if (responseCode !in 200..299) {
+                        throw Exception("HTTP $responseCode")
                     }
 
-                    playlistChannels.clear()
-                    playlistChannels.addAll(parsed)
+                    val content = connection.inputStream
+                        .bufferedReader(Charsets.UTF_8)
+                        .use { it.readText() }
 
-                    updateCombinedChannels()
+                    val parsed = parseM3U(content)
 
-                    status.text =
-                        "${channels.size} CHANNELS AVAILABLE | " +
-                        "${parsed.size} PLAYLIST CHANNELS"
-                }
+                    parsed.forEach { channel ->
 
-            } catch (e: Exception) {
-                runOnUiThread {
-                    if (isFinishing || requestId != playlistRequestId) {
-                        return@runOnUiThread
+                        val finalCategory =
+                            if (channel.third == "Other") {
+                                playlistName
+                            } else {
+                                "$playlistName • ${channel.third}"
+                            }
+
+                        allChannels.add(
+                            Triple(
+                                channel.first,
+                                channel.second,
+                                finalCategory
+                            )
+                        )
                     }
 
-                    status.text =
-                        "Playlist error: ${e.message ?: "Download failed"}"
+                    if (parsed.isEmpty()) {
+                        errors.add("$playlistName: No channels found")
+                    }
+
+                } catch (e: Exception) {
+
+                    errors.add(
+                        "$playlistName: ${e.message ?: "Download failed"}"
+                    )
+
+                } finally {
+                    connection?.disconnect()
                 }
-            } finally {
-                connection?.disconnect()
+            }
+
+            runOnUiThread {
+
+                if (isFinishing || requestId != playlistRequestId) {
+                    return@runOnUiThread
+                }
+
+                playlistChannels.clear()
+                playlistChannels.addAll(allChannels)
+
+                updateCombinedChannels()
+
+                status.text =
+                    "${channels.size} CHANNELS AVAILABLE | " +
+                    "${playlistItems.size} PLAYLISTS"
+
+                if (errors.isNotEmpty()) {
+                    status.text =
+                        "${channels.size} CHANNELS | " +
+                        "${errors.size} PLAYLIST ERROR(S)"
+                }
             }
         }
     }
@@ -571,7 +652,8 @@ class MainActivity : Activity() {
         content: String
     ): List<Triple<String, String, String>> {
 
-        val result = mutableListOf<Triple<String, String, String>>()
+        val result =
+            mutableListOf<Triple<String, String, String>>()
 
         var currentName = ""
         var currentCategory = "Other"
@@ -604,8 +686,7 @@ class MainActivity : Activity() {
 
                 currentName = tvgName
                     ?.takeIf { it.isNotBlank() }
-                    ?: displayName
-                    .ifBlank { "Unknown Channel" }
+                    ?: displayName.ifBlank { "Unknown Channel" }
 
                 currentCategory = groupTitle
                     ?.takeIf { it.isNotBlank() }
@@ -613,11 +694,14 @@ class MainActivity : Activity() {
 
             } else if (
                 !line.startsWith("#") &&
-                (line.startsWith("http://", true) ||
-                 line.startsWith("https://", true))
+                (
+                    line.startsWith("http://", true) ||
+                    line.startsWith("https://", true)
+                )
             ) {
 
                 if (currentName.isNotBlank()) {
+
                     result.add(
                         Triple(
                             currentName,
@@ -635,7 +719,10 @@ class MainActivity : Activity() {
         return result
     }
 
+    // CATEGORY LIST
+
     private fun renderCategories() {
+
         categoryList.removeAllViews()
 
         val categories = listOf("All") +
@@ -651,8 +738,10 @@ class MainActivity : Activity() {
                 if (selected) white else muted,
                 true
             ).apply {
+
                 gravity = Gravity.CENTER
                 setPadding(dp(15), dp(10), dp(15), dp(10))
+
                 background = rounded(
                     if (selected) blue else panel,
                     20
@@ -668,11 +757,15 @@ class MainActivity : Activity() {
 
             val params = LinearLayout.LayoutParams(-2, -2)
             params.setMargins(0, 0, dp(8), 0)
+
             categoryList.addView(chip, params)
         }
     }
 
+    // CHANNEL LIST
+
     private fun renderChannels() {
+
         channelList.removeAllViews()
 
         val filtered = when (page) {
@@ -714,6 +807,8 @@ class MainActivity : Activity() {
             channelList.addView(empty)
         }
     }
+
+    // CHANNEL CARD
 
     private fun createChannelCard(
         channel: Triple<String, String, String>
@@ -800,6 +895,7 @@ class MainActivity : Activity() {
             val intent = Intent(this, PlayerActivity::class.java)
             intent.putExtra("url", channel.second)
             intent.putExtra("name", channel.first)
+
             startActivity(intent)
         }
 
@@ -810,18 +906,28 @@ class MainActivity : Activity() {
         return card
     }
 
+    // BACK BUTTON
+
     override fun onBackPressed() {
+
         if (drawer.visibility == View.VISIBLE) {
             drawer.visibility = View.GONE
+
         } else if (page != "home") {
             page = "home"
+            selectedCategory = "All"
+            renderCategories()
             renderChannels()
+
         } else {
             super.onBackPressed()
         }
     }
 
+    // CLEANUP
+
     override fun onDestroy() {
+
         playlistRequestId++
 
         channelsListener?.remove()
