@@ -15,11 +15,11 @@ import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import android.view.WindowManager
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -37,7 +37,7 @@ class PlayerActivity : Activity() {
 
     private var fullscreen = false
     private var retryCount = 0
-    private var isReconnecting = false
+    private var retryPending = false
 
     private var previousOrientation =
         ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -48,14 +48,17 @@ class PlayerActivity : Activity() {
 
     private val maxRetryDelay = 15000L
 
+    private var videoUrl: String = ""
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val videoUrl = intent.getStringExtra("url")
+        videoUrl = intent.getStringExtra("url") ?: ""
+
         val channelName =
             intent.getStringExtra("name") ?: "Ashika Live TV"
 
-        if (videoUrl.isNullOrBlank()) {
+        if (videoUrl.isBlank()) {
             Toast.makeText(
                 this,
                 "Invalid video URL",
@@ -68,7 +71,7 @@ class PlayerActivity : Activity() {
         title = channelName
 
         createPlayerUI()
-        initializePlayer(videoUrl)
+        initializePlayer()
     }
 
     private fun createPlayerUI() {
@@ -151,7 +154,7 @@ class PlayerActivity : Activity() {
         setContentView(root)
     }
 
-    private fun initializePlayer(videoUrl: String) {
+    private fun initializePlayer() {
 
         val mediaItem = MediaItem.fromUri(videoUrl)
 
@@ -181,19 +184,21 @@ class PlayerActivity : Activity() {
                             Player.STATE_READY -> {
                                 if (exoPlayer.isPlaying) {
                                     statusText.visibility = View.GONE
-                                } else {
-                                    statusText.visibility = View.GONE
+                                } else if (exoPlayer.playWhenReady) {
+                                    statusText.visibility = View.VISIBLE
+                                    statusText.text = "Starting video..."
                                 }
                             }
 
                             Player.STATE_ENDED -> {
-                                statusText.visibility = View.VISIBLE
-                                statusText.text = "Stream ended"
+                                startAutoReconnect()
                             }
 
                             Player.STATE_IDLE -> {
-                                statusText.visibility = View.VISIBLE
-                                statusText.text = "Waiting..."
+                                if (!retryPending) {
+                                    statusText.visibility = View.VISIBLE
+                                    statusText.text = "Waiting..."
+                                }
                             }
                         }
                     }
@@ -203,17 +208,18 @@ class PlayerActivity : Activity() {
                     ) {
 
                         if (isPlaying) {
-                            // Keep screen awake while video plays
+
                             window.addFlags(
                                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                             )
 
                             statusText.visibility = View.GONE
+
                             retryCount = 0
-                            isReconnecting = false
+                            cancelReconnect()
 
                         } else {
-                            // Restore normal screen timeout
+
                             window.clearFlags(
                                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                             )
@@ -236,15 +242,18 @@ class PlayerActivity : Activity() {
 
         if (isFinishing || isDestroyed) return
 
-        if (isReconnecting) return
+        if (retryPending) return
 
-        isReconnecting = true
         retryCount++
 
+        val exponent = minOf(retryCount - 1, 4)
+
         val delay = minOf(
-            1000L * (1L shl minOf(retryCount - 1, 4)),
+            1000L * (1L shl exponent),
             maxRetryDelay
         )
+
+        retryPending = true
 
         statusText.visibility = View.VISIBLE
         statusText.text = "Reconnecting... ($retryCount)"
@@ -255,29 +264,40 @@ class PlayerActivity : Activity() {
 
         val runnable = Runnable {
 
+            retryPending = false
+            retryRunnable = null
+
             if (isFinishing || isDestroyed) return@Runnable
 
             val currentPlayer = player
 
-            if (currentPlayer != null) {
+            if (currentPlayer == null) return@Runnable
 
-                try {
-                    currentPlayer.stop()
-                    currentPlayer.prepare()
-                    currentPlayer.playWhenReady = true
+            try {
 
-                } catch (e: Exception) {
-                    isReconnecting = false
-                    startAutoReconnect()
-                }
+                currentPlayer.stop()
+                currentPlayer.prepare()
+                currentPlayer.playWhenReady = true
 
-            } else {
-                isReconnecting = false
+            } catch (e: Exception) {
+
+                startAutoReconnect()
             }
         }
 
         retryRunnable = runnable
+
         handler.postDelayed(runnable, delay)
+    }
+
+    private fun cancelReconnect() {
+
+        retryRunnable?.let {
+            handler.removeCallbacks(it)
+        }
+
+        retryRunnable = null
+        retryPending = false
     }
 
     private fun makeButton(
@@ -431,9 +451,9 @@ class PlayerActivity : Activity() {
             if (isInPictureInPictureMode) View.GONE
             else View.VISIBLE
 
-        statusText.visibility =
-            if (isInPictureInPictureMode) View.GONE
-            else statusText.visibility
+        if (isInPictureInPictureMode) {
+            statusText.visibility = View.GONE
+        }
 
         if (!isInPictureInPictureMode) {
             applyFullscreen()
@@ -467,16 +487,6 @@ class PlayerActivity : Activity() {
 
             cancelReconnect()
         }
-    }
-
-    private fun cancelReconnect() {
-
-        retryRunnable?.let {
-            handler.removeCallbacks(it)
-        }
-
-        retryRunnable = null
-        isReconnecting = false
     }
 
     override fun onDestroy() {
