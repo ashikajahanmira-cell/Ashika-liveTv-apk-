@@ -2,6 +2,7 @@ package com.ashika.livetv
 
 import android.app.Activity
 import android.app.PictureInPictureParams
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
@@ -13,10 +14,8 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import android.content.pm.ActivityInfo
 
 import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 
@@ -62,16 +61,13 @@ class PlayerActivity : Activity() {
             setBackgroundColor(0x99000000.toInt())
         }
 
-        val pipButton = makeButton("POPUP") {
+        topControls.addView(makeButton("POPUP") {
             openPictureInPicture()
-        }
+        })
 
-        val fullButton = makeButton("FULL") {
+        topControls.addView(makeButton("FULL") {
             toggleFullscreen()
-        }
-
-        topControls.addView(pipButton)
-        topControls.addView(fullButton)
+        })
 
         val controlsParams = FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -80,7 +76,6 @@ class PlayerActivity : Activity() {
         )
 
         root.addView(topControls, controlsParams)
-
         setContentView(root)
 
         try {
@@ -113,9 +108,7 @@ class PlayerActivity : Activity() {
             isClickable = true
             isFocusable = true
 
-            setOnClickListener {
-                action()
-            }
+            setOnClickListener { action() }
 
             val params = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -127,24 +120,25 @@ class PlayerActivity : Activity() {
     }
 
     private fun openPictureInPicture() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                val params = PictureInPictureParams.Builder()
-                    .setAspectRatio(Rational(16, 9))
-                    .build()
-
-                enterPictureInPictureMode(params)
-            } catch (e: Exception) {
-                Toast.makeText(
-                    this,
-                    "Popup mode unavailable",
-                    Toast.LENGTH_SHORT
-                ).show()
-            }
-        } else {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             Toast.makeText(
                 this,
                 "Popup requires Android 8.0 or newer",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        try {
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(Rational(16, 9))
+                .build()
+
+            enterPictureInPictureMode(params)
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "Popup unavailable: ${e.message}",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -152,52 +146,73 @@ class PlayerActivity : Activity() {
 
     private fun toggleFullscreen() {
         fullscreen = !fullscreen
+        applyFullscreen()
+    }
 
-        if (fullscreen) {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility =
+    private fun applyFullscreen() {
+        if (!::topControls.isInitialized) return
+
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility =
+            if (fullscreen && !isInPictureInPictureMode) {
                 (View.SYSTEM_UI_FLAG_FULLSCREEN
                 or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                 or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
-
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility =
+            } else {
                 View.SYSTEM_UI_FLAG_VISIBLE
-        }
+            }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyFullscreen()
     }
 
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
-        newConfig: android.content.res.Configuration
+        newConfig: Configuration
     ) {
         super.onPictureInPictureModeChanged(
             isInPictureInPictureMode,
             newConfig
         )
 
-        topControls.visibility =
-            if (isInPictureInPictureMode) View.GONE
-            else View.VISIBLE
+        if (::topControls.isInitialized) {
+            topControls.visibility =
+                if (isInPictureInPictureMode) View.GONE
+                else View.VISIBLE
+        }
 
-        playerView.useController = !isInPictureInPictureMode
+        if (::playerView.isInitialized) {
+            playerView.useController = !isInPictureInPictureMode
+        }
+
+        if (!isInPictureInPictureMode) {
+            applyFullscreen()
+        }
     }
 
     override fun onStop() {
         super.onStop()
 
-        if (Build.VERSION.SDK_INT < 24 || !isInPictureInPictureMode) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            !isInPictureInPictureMode
+        ) {
             player?.pause()
         }
     }
 
     override fun onDestroy() {
-        playerView.player = null
+        if (::playerView.isInitialized) {
+            playerView.player = null
+        }
+
         player?.release()
         player = null
+
         super.onDestroy()
     }
 }
