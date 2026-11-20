@@ -2,6 +2,7 @@ package com.ashika.livetv
 
 import android.app.Activity
 import android.app.PictureInPictureParams
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
@@ -26,7 +27,10 @@ class PlayerActivity : Activity() {
     private lateinit var textureView: TextureView
     private lateinit var topControls: LinearLayout
     private lateinit var controlView: PlayerControlView
+
     private var fullscreen = false
+    private var previousOrientation =
+        ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -64,8 +68,7 @@ class PlayerActivity : Activity() {
         })
 
         topControls.addView(makeButton("FULL SCREEN") {
-            fullscreen = !fullscreen
-            applyFullscreen()
+            toggleFullscreen()
         })
 
         root.addView(topControls, FrameLayout.LayoutParams(
@@ -114,6 +117,19 @@ class PlayerActivity : Activity() {
                 setMargins(6, 4, 6, 4)
             }
         }
+    }
+
+    private fun toggleFullscreen() {
+        fullscreen = !fullscreen
+
+        if (fullscreen) {
+            previousOrientation = requestedOrientation
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            requestedOrientation = previousOrientation
+        }
+
+        applyFullscreen()
     }
 
     private fun openPictureInPicture() {
@@ -178,13 +194,25 @@ class PlayerActivity : Activity() {
         if (!isInPictureInPictureMode) applyFullscreen()
     }
 
+    override fun onBackPressed() {
+        if (fullscreen) {
+            fullscreen = false
+            requestedOrientation = previousOrientation
+            applyFullscreen()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
     override fun onStop() {
         super.onStop()
         if (!isInPictureInPictureMode) player?.pause()
     }
 
     override fun onDestroy() {
-        controlView.player = null
+        if (::controlView.isInitialized) {
+            controlView.player = null
+        }
         player?.release()
         player = null
         super.onDestroy()
