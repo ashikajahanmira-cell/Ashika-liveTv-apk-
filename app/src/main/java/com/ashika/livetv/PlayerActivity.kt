@@ -7,6 +7,8 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Rational
 import android.view.Gravity
 import android.view.TextureView
@@ -17,33 +19,59 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.view.WindowManager
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerControlView
 
 class PlayerActivity : Activity() {
 
     private var player: ExoPlayer? = null
+
     private lateinit var textureView: TextureView
     private lateinit var topControls: LinearLayout
     private lateinit var controlView: PlayerControlView
+    private lateinit var statusText: TextView
 
     private var fullscreen = false
+    private var retryCount = 0
+    private var isReconnecting = false
+
     private var previousOrientation =
         ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+
+    private val handler = Handler(Looper.getMainLooper())
+
+    private var retryRunnable: Runnable? = null
+
+    private val maxRetryDelay = 15000L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val videoUrl = intent.getStringExtra("url")
-        val channelName = intent.getStringExtra("name") ?: "Ashika Live TV"
+        val channelName =
+            intent.getStringExtra("name") ?: "Ashika Live TV"
 
         if (videoUrl.isNullOrBlank()) {
+            Toast.makeText(
+                this,
+                "Invalid video URL",
+                Toast.LENGTH_LONG
+            ).show()
             finish()
             return
         }
 
         title = channelName
+
+        createPlayerUI()
+        initializePlayer(videoUrl)
+    }
+
+    private fun createPlayerUI() {
 
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)
@@ -51,64 +79,229 @@ class PlayerActivity : Activity() {
 
         textureView = TextureView(this)
 
-        root.addView(textureView, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        ))
+        root.addView(
+            textureView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
 
         topControls = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(8, 8, 8, 8)
-            setBackgroundColor(0xCC101B30.toInt())
+            setBackgroundColor(0xCC170B2E.toInt())
         }
 
-        topControls.addView(makeButton("POPUP") {
-            openPictureInPicture()
-        })
+        topControls.addView(
+            makeButton("POPUP") {
+                openPictureInPicture()
+            }
+        )
 
-        topControls.addView(makeButton("FULL SCREEN") {
-            toggleFullscreen()
-        })
+        topControls.addView(
+            makeButton("FULL SCREEN") {
+                toggleFullscreen()
+            }
+        )
 
-        root.addView(topControls, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.END
-        ))
+        root.addView(
+            topControls,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.END
+            )
+        )
 
-        controlView = PlayerControlView(this).apply {
-            setShowTimeoutMs(4000)
-        }
-
-        root.addView(controlView, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            Gravity.BOTTOM
-        ))
-
-        setContentView(root)
-
-        player = ExoPlayer.Builder(this).build().also {
-            it.setVideoTextureView(textureView)
-            it.setMediaItem(MediaItem.fromUri(videoUrl))
-            controlView.player = it
-            it.prepare()
-            it.playWhenReady = true
-        }
-    }
-
-    private fun makeButton(text: String, action: () -> Unit): TextView {
-        return TextView(this).apply {
-            this.text = text
+        statusText = TextView(this).apply {
+            text = "Connecting..."
             textSize = 14f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
+            setPadding(12, 8, 12, 8)
+            setBackgroundColor(0xAA170B2E.toInt())
+        }
+
+        root.addView(
+            statusText,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+            )
+        )
+
+        controlView = PlayerControlView(this).apply {
+            setShowTimeoutMs(4000)
+            setShowPreviousButton(false)
+            setShowNextButton(false)
+        }
+
+        root.addView(
+            controlView,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM
+            )
+        )
+
+        setContentView(root)
+    }
+
+    private fun initializePlayer(videoUrl: String) {
+
+        val mediaItem = MediaItem.fromUri(videoUrl)
+
+        player = ExoPlayer.Builder(this)
+            .build()
+            .also { exoPlayer ->
+
+                exoPlayer.setVideoTextureView(textureView)
+
+                exoPlayer.setMediaItem(mediaItem)
+
+                controlView.player = exoPlayer
+
+                exoPlayer.addListener(object : Player.Listener {
+
+                    override fun onPlaybackStateChanged(
+                        playbackState: Int
+                    ) {
+
+                        when (playbackState) {
+
+                            Player.STATE_BUFFERING -> {
+                                statusText.visibility = View.VISIBLE
+                                statusText.text = "Loading video..."
+                            }
+
+                            Player.STATE_READY -> {
+                                if (exoPlayer.isPlaying) {
+                                    statusText.visibility = View.GONE
+                                } else {
+                                    statusText.visibility = View.GONE
+                                }
+                            }
+
+                            Player.STATE_ENDED -> {
+                                statusText.visibility = View.VISIBLE
+                                statusText.text = "Stream ended"
+                            }
+
+                            Player.STATE_IDLE -> {
+                                statusText.visibility = View.VISIBLE
+                                statusText.text = "Waiting..."
+                            }
+                        }
+                    }
+
+                    override fun onIsPlayingChanged(
+                        isPlaying: Boolean
+                    ) {
+
+                        if (isPlaying) {
+                            // Keep screen awake while video plays
+                            window.addFlags(
+                                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                            )
+
+                            statusText.visibility = View.GONE
+                            retryCount = 0
+                            isReconnecting = false
+
+                        } else {
+                            // Restore normal screen timeout
+                            window.clearFlags(
+                                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                            )
+                        }
+                    }
+
+                    override fun onPlayerError(
+                        error: PlaybackException
+                    ) {
+                        startAutoReconnect()
+                    }
+                })
+
+                exoPlayer.prepare()
+                exoPlayer.playWhenReady = true
+            }
+    }
+
+    private fun startAutoReconnect() {
+
+        if (isFinishing || isDestroyed) return
+
+        if (isReconnecting) return
+
+        isReconnecting = true
+        retryCount++
+
+        val delay = minOf(
+            1000L * (1L shl minOf(retryCount - 1, 4)),
+            maxRetryDelay
+        )
+
+        statusText.visibility = View.VISIBLE
+        statusText.text = "Reconnecting... ($retryCount)"
+
+        retryRunnable?.let {
+            handler.removeCallbacks(it)
+        }
+
+        val runnable = Runnable {
+
+            if (isFinishing || isDestroyed) return@Runnable
+
+            val currentPlayer = player
+
+            if (currentPlayer != null) {
+
+                try {
+                    currentPlayer.stop()
+                    currentPlayer.prepare()
+                    currentPlayer.playWhenReady = true
+
+                } catch (e: Exception) {
+                    isReconnecting = false
+                    startAutoReconnect()
+                }
+
+            } else {
+                isReconnecting = false
+            }
+        }
+
+        retryRunnable = runnable
+        handler.postDelayed(runnable, delay)
+    }
+
+    private fun makeButton(
+        text: String,
+        action: () -> Unit
+    ): TextView {
+
+        return TextView(this).apply {
+
+            this.text = text
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+
             setPadding(18, 15, 18, 15)
-            setBackgroundColor(0xFF1769AA.toInt())
+
+            setBackgroundColor(0xFF8A2BE2.toInt())
+
             isClickable = true
             isFocusable = true
-            setOnClickListener { action() }
+
+            setOnClickListener {
+                action()
+            }
 
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -120,12 +313,18 @@ class PlayerActivity : Activity() {
     }
 
     private fun toggleFullscreen() {
+
         fullscreen = !fullscreen
 
         if (fullscreen) {
+
             previousOrientation = requestedOrientation
-            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+
+            requestedOrientation =
+                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+
         } else {
+
             requestedOrientation = previousOrientation
         }
 
@@ -133,88 +332,170 @@ class PlayerActivity : Activity() {
     }
 
     private fun openPictureInPicture() {
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            Toast.makeText(this, "Android 8.0 or newer required", Toast.LENGTH_LONG).show()
+
+            Toast.makeText(
+                this,
+                "Android 8.0 or newer required",
+                Toast.LENGTH_LONG
+            ).show()
+
             return
         }
 
         try {
+
             val params = PictureInPictureParams.Builder()
                 .setAspectRatio(Rational(16, 9))
                 .build()
 
             enterPictureInPictureMode(params)
+
         } catch (e: Exception) {
-            Toast.makeText(this, "Popup error: ${e.message}", Toast.LENGTH_LONG).show()
+
+            Toast.makeText(
+                this,
+                "Popup error: ${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
     private fun applyFullscreen() {
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+
             if (fullscreen && !isInPictureInPictureMode) {
-                window.insetsController?.hide(WindowInsets.Type.systemBars())
+
+                window.insetsController?.hide(
+                    WindowInsets.Type.systemBars()
+                )
+
                 window.insetsController?.systemBarsBehavior =
-                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    android.view.WindowInsetsController
+                        .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
             } else {
-                window.insetsController?.show(WindowInsets.Type.systemBars())
+
+                window.insetsController?.show(
+                    WindowInsets.Type.systemBars()
+                )
             }
+
         } else {
+
             @Suppress("DEPRECATION")
+
             window.decorView.systemUiVisibility =
                 if (fullscreen && !isInPictureInPictureMode) {
-                    (View.SYSTEM_UI_FLAG_FULLSCREEN
-                        or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                        or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+
+                    View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+
                 } else {
+
                     View.SYSTEM_UI_FLAG_VISIBLE
                 }
         }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
+
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) applyFullscreen()
+
+        if (hasFocus) {
+            applyFullscreen()
+        }
     }
 
     override fun onPictureInPictureModeChanged(
         isInPictureInPictureMode: Boolean,
         newConfig: Configuration
     ) {
-        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+
+        super.onPictureInPictureModeChanged(
+            isInPictureInPictureMode,
+            newConfig
+        )
 
         topControls.visibility =
-            if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+            if (isInPictureInPictureMode) View.GONE
+            else View.VISIBLE
 
         controlView.visibility =
-            if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+            if (isInPictureInPictureMode) View.GONE
+            else View.VISIBLE
 
-        if (!isInPictureInPictureMode) applyFullscreen()
+        statusText.visibility =
+            if (isInPictureInPictureMode) View.GONE
+            else statusText.visibility
+
+        if (!isInPictureInPictureMode) {
+            applyFullscreen()
+        }
     }
 
+    @Suppress("DEPRECATION")
     override fun onBackPressed() {
+
         if (fullscreen) {
+
             fullscreen = false
+
             requestedOrientation = previousOrientation
+
             applyFullscreen()
+
         } else {
+
             super.onBackPressed()
         }
     }
 
     override fun onStop() {
+
         super.onStop()
-        if (!isInPictureInPictureMode) player?.pause()
+
+        if (!isInPictureInPictureMode) {
+
+            player?.pause()
+
+            cancelReconnect()
+        }
+    }
+
+    private fun cancelReconnect() {
+
+        retryRunnable?.let {
+            handler.removeCallbacks(it)
+        }
+
+        retryRunnable = null
+        isReconnecting = false
     }
 
     override fun onDestroy() {
+
+        cancelReconnect()
+
+        handler.removeCallbacksAndMessages(null)
+
         if (::controlView.isInitialized) {
             controlView.player = null
         }
+
+        window.clearFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        )
+
         player?.release()
         player = null
+
         super.onDestroy()
     }
 }
