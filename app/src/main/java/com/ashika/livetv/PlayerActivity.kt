@@ -1,14 +1,21 @@
 package com.ashika.livetv
 
 import android.app.Activity
+import android.app.PictureInPictureParams
+import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import android.graphics.Color
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import android.content.pm.ActivityInfo
+
 import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -16,20 +23,21 @@ import androidx.media3.ui.PlayerView
 class PlayerActivity : Activity() {
 
     private var player: ExoPlayer? = null
-    private lateinit var status: TextView
+    private lateinit var playerView: PlayerView
+    private lateinit var topControls: LinearLayout
+    private var fullscreen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val videoUrl = intent.getStringExtra("url")
+        val channelName =
+            intent.getStringExtra("name") ?: "Ashika Live TV"
 
         if (videoUrl.isNullOrBlank()) {
             finish()
             return
         }
-
-        val channelName =
-            intent.getStringExtra("name") ?: "Ashika Live TV"
 
         title = channelName
 
@@ -37,86 +45,157 @@ class PlayerActivity : Activity() {
             setBackgroundColor(Color.BLACK)
         }
 
-        val playerView = PlayerView(this).apply {
+        playerView = PlayerView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
-        }
-
-        status = TextView(this).apply {
-            text = "Connecting to channel..."
-            textSize = 16f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setPadding(20, 20, 20, 20)
+            useController = true
         }
 
         root.addView(playerView)
-        root.addView(
-            status,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER
-            )
+
+        topControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(8, 8, 8, 8)
+            setBackgroundColor(0x99000000.toInt())
+        }
+
+        val pipButton = makeButton("POPUP") {
+            openPictureInPicture()
+        }
+
+        val fullButton = makeButton("FULL") {
+            toggleFullscreen()
+        }
+
+        topControls.addView(pipButton)
+        topControls.addView(fullButton)
+
+        val controlsParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END
         )
+
+        root.addView(topControls, controlsParams)
 
         setContentView(root)
 
         try {
-            player = ExoPlayer.Builder(this).build()
-
-            playerView.player = player
-
-            player?.addListener(object : Player.Listener {
-
-                override fun onPlaybackStateChanged(
-                    playbackState: Int
-                ) {
-                    when (playbackState) {
-                        Player.STATE_BUFFERING -> {
-                            status.text = "Loading video..."
-                            status.visibility = android.view.View.VISIBLE
-                        }
-
-                        Player.STATE_READY -> {
-                            status.visibility = android.view.View.GONE
-                        }
-
-                        Player.STATE_ENDED -> {
-                            status.text = "Stream ended"
-                            status.visibility = android.view.View.VISIBLE
-                        }
-                    }
-                }
-
-                override fun onPlayerError(
-                    error: PlaybackException
-                ) {
-                    status.text =
-                        "Video could not be played.\n" +
-                        error.errorCodeName
-
-                    status.visibility = android.view.View.VISIBLE
-                }
-            })
-
-            player?.setMediaItem(MediaItem.fromUri(videoUrl))
-            player?.prepare()
-            player?.playWhenReady = true
-
+            player = ExoPlayer.Builder(this).build().also {
+                playerView.player = it
+                it.setMediaItem(MediaItem.fromUri(videoUrl))
+                it.prepare()
+                it.playWhenReady = true
+            }
         } catch (e: Exception) {
-            status.text = "Player error: ${e.message}"
+            Toast.makeText(
+                this,
+                "Player error: ${e.message}",
+                Toast.LENGTH_LONG
+            ).show()
         }
+    }
+
+    private fun makeButton(
+        text: String,
+        action: () -> Unit
+    ): TextView {
+        return TextView(this).apply {
+            this.text = text
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(18, 14, 18, 14)
+            setBackgroundColor(0xFF26364F.toInt())
+            isClickable = true
+            isFocusable = true
+
+            setOnClickListener {
+                action()
+            }
+
+            val params = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            params.setMargins(5, 0, 5, 0)
+            layoutParams = params
+        }
+    }
+
+    private fun openPictureInPicture() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(16, 9))
+                    .build()
+
+                enterPictureInPictureMode(params)
+            } catch (e: Exception) {
+                Toast.makeText(
+                    this,
+                    "Popup mode unavailable",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        } else {
+            Toast.makeText(
+                this,
+                "Popup requires Android 8.0 or newer",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun toggleFullscreen() {
+        fullscreen = !fullscreen
+
+        if (fullscreen) {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility =
+                (View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_VISIBLE
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: android.content.res.Configuration
+    ) {
+        super.onPictureInPictureModeChanged(
+            isInPictureInPictureMode,
+            newConfig
+        )
+
+        topControls.visibility =
+            if (isInPictureInPictureMode) View.GONE
+            else View.VISIBLE
+
+        playerView.useController = !isInPictureInPictureMode
     }
 
     override fun onStop() {
         super.onStop()
-        player?.pause()
+
+        if (Build.VERSION.SDK_INT < 24 || !isInPictureInPictureMode) {
+            player?.pause()
+        }
     }
 
     override fun onDestroy() {
+        playerView.player = null
         player?.release()
         player = null
         super.onDestroy()
