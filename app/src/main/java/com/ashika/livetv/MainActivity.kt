@@ -11,6 +11,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.speech.RecognizerIntent
 import android.widget.*
 import android.text.TextWatcher
@@ -39,6 +43,43 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var search: EditText
     private lateinit var drawer: LinearLayout
+    private lateinit var connectionStatus: TextView
+
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallbackRegistered = false
+
+    private val networkCallback =
+        object : ConnectivityManager.NetworkCallback() {
+
+            override fun onAvailable(network: Network) {
+                runOnUiThread {
+                    updateConnectionStatus(isInternetAvailable())
+                }
+            }
+
+            override fun onLost(network: Network) {
+                runOnUiThread {
+                    updateConnectionStatus(isInternetAvailable())
+                }
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                capabilities: NetworkCapabilities
+            ) {
+                val connected =
+                    capabilities.hasCapability(
+                        NetworkCapabilities.NET_CAPABILITY_INTERNET
+                    ) &&
+                    capabilities.hasCapability(
+                        NetworkCapabilities.NET_CAPABILITY_VALIDATED
+                    )
+
+                runOnUiThread {
+                    updateConnectionStatus(connected)
+                }
+            }
+        }
 
     private val channels =
         mutableListOf<Triple<String, String, String>>()
@@ -71,17 +112,21 @@ class MainActivity : Activity() {
 
         history.addAll(
             prefs.getString("history", "")
-                ?.split("\n")?.filter { it.isNotBlank() }
+                ?.split("\n")
+                ?.filter { it.isNotBlank() }
                 ?: emptyList()
         )
 
         buildHome()
+        startInternetMonitoring()
         loadChannels()
 
         if (prefs.getBoolean("pin_enabled", false)) {
             showAppLock()
         }
     }
+
+    // BASIC HELPERS
 
     private fun dp(v: Int): Int =
         (v * resources.displayMetrics.density).toInt()
@@ -91,9 +136,11 @@ class MainActivity : Activity() {
         radius: Int = 16,
         stroke: Int = 0
     ): GradientDrawable {
+
         return GradientDrawable().apply {
             setColor(color)
             cornerRadius = dp(radius).toFloat()
+
             if (stroke != 0) {
                 setStroke(dp(1), stroke)
             }
@@ -106,11 +153,15 @@ class MainActivity : Activity() {
         color: Int = white,
         bold: Boolean = false
     ): TextView {
+
         return TextView(this).apply {
             this.text = text
             textSize = size
             setTextColor(color)
-            if (bold) setTypeface(null, Typeface.BOLD)
+
+            if (bold) {
+                setTypeface(null, Typeface.BOLD)
+            }
         }
     }
 
@@ -118,11 +169,83 @@ class MainActivity : Activity() {
         text: String,
         action: () -> Unit
     ): TextView {
+
         return label(text, 14f, white, true).apply {
             gravity = Gravity.CENTER
             setPadding(dp(15), dp(12), dp(15), dp(12))
             background = rounded(purple, 15)
             setOnClickListener { action() }
+        }
+    }
+
+    // INTERNET CONNECTION MONITORING
+
+    private fun startInternetMonitoring() {
+
+        connectivityManager =
+            getSystemService(CONNECTIVITY_SERVICE)
+                as ConnectivityManager
+
+        updateConnectionStatus(isInternetAvailable())
+
+        try {
+            val request = NetworkRequest.Builder()
+                .addCapability(
+                    NetworkCapabilities.NET_CAPABILITY_INTERNET
+                )
+                .build()
+
+            connectivityManager?.registerNetworkCallback(
+                request,
+                networkCallback
+            )
+
+            networkCallbackRegistered = true
+
+        } catch (e: Exception) {
+            updateConnectionStatus(isInternetAvailable())
+        }
+    }
+
+    private fun isInternetAvailable(): Boolean {
+
+        return try {
+            val manager = connectivityManager
+                ?: getSystemService(CONNECTIVITY_SERVICE)
+                    as ConnectivityManager
+
+            val network = manager.activeNetwork ?: return false
+
+            val capabilities =
+                manager.getNetworkCapabilities(network)
+                    ?: return false
+
+            capabilities.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_INTERNET
+            ) &&
+            capabilities.hasCapability(
+                NetworkCapabilities.NET_CAPABILITY_VALIDATED
+            )
+
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun updateConnectionStatus(connected: Boolean) {
+
+        if (!::connectionStatus.isInitialized) return
+
+        if (connected) {
+            connectionStatus.text = "● ONLINE"
+            connectionStatus.setTextColor(
+                Color.rgb(60, 230, 140)
+            )
+        } else {
+            connectionStatus.text = "● OFFLINE"
+            connectionStatus.setTextColor(
+                Color.rgb(255, 75, 120)
+            )
         }
     }
 
@@ -154,23 +277,34 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
 
-        brand.addView(label("ASHIKA", 24f, purpleLight, true))
-        brand.addView(label("LIVE TELEVISION • PREMIUM", 9f, muted, true))
+        brand.addView(
+            label("ASHIKA", 24f, purpleLight, true)
+        )
 
-        val live = label("● LIVE", 12f, Color.rgb(255, 75, 120), true)
-            .apply {
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                background = rounded(panel, 20, purple)
-            }
+        brand.addView(
+            label("LIVE TELEVISION • PREMIUM", 9f, muted, true)
+        )
+
+        connectionStatus = label(
+            "● CHECKING",
+            12f,
+            purpleLight,
+            true
+        ).apply {
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            background = rounded(panel, 20, purple)
+        }
 
         header.addView(menu)
         header.addView(brand)
-        header.addView(live)
+        header.addView(connectionStatus)
+
         root.addView(header)
 
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(23), dp(20), dp(20))
+
             background = GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
                 intArrayOf(
@@ -184,7 +318,14 @@ class MainActivity : Activity() {
             }
         }
 
-        hero.addView(label("WELCOME TO PREMIUM ENTERTAINMENT", 10f, purpleLight, true))
+        hero.addView(
+            label(
+                "WELCOME TO PREMIUM ENTERTAINMENT",
+                10f,
+                purpleLight,
+                true
+            )
+        )
 
         hero.addView(
             label("ASHIKA LIVE TV", 27f, white, true).apply {
@@ -193,7 +334,11 @@ class MainActivity : Activity() {
         )
 
         hero.addView(
-            label("Your entertainment. One destination.", 12f, muted)
+            label(
+                "Your entertainment. One destination.",
+                12f,
+                muted
+            )
         )
 
         val explore = button("▶   EXPLORE CHANNELS") {
@@ -205,10 +350,12 @@ class MainActivity : Activity() {
 
         val heroParams = LinearLayout.LayoutParams(-2, -2)
         heroParams.topMargin = dp(17)
+
         hero.addView(explore, heroParams)
 
         val heroOuter = LinearLayout.LayoutParams(-1, -2)
         heroOuter.topMargin = dp(18)
+
         root.addView(hero, heroOuter)
 
         val section = LinearLayout(this).apply {
@@ -222,8 +369,17 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(0, -2, 1f)
         )
 
-        val refresh = label("↻ Refresh", 13f, purpleLight, true)
-        refresh.setOnClickListener { loadChannels() }
+        val refresh = label(
+            "↻ Refresh",
+            13f,
+            purpleLight,
+            true
+        )
+
+        refresh.setOnClickListener {
+            loadChannels()
+        }
+
         section.addView(refresh)
         root.addView(section)
 
@@ -253,10 +409,14 @@ class MainActivity : Activity() {
             startVoiceSearch()
         }
 
-        val micParams = LinearLayout.LayoutParams(dp(52), dp(48))
-        micParams.marginStart = dp(8)
-        searchRow.addView(mic, micParams)
+        val micParams = LinearLayout.LayoutParams(
+            dp(52),
+            dp(48)
+        )
 
+        micParams.marginStart = dp(8)
+
+        searchRow.addView(mic, micParams)
         root.addView(searchRow)
 
         categoryList = LinearLayout(this).apply {
@@ -270,9 +430,15 @@ class MainActivity : Activity() {
 
         val catParams = LinearLayout.LayoutParams(-1, -2)
         catParams.topMargin = dp(13)
+
         root.addView(categoryScroll, catParams)
 
-        status = label("Connecting to Firebase...", 12f, muted)
+        status = label(
+            "Connecting to Firebase...",
+            12f,
+            muted
+        )
+
         status.setPadding(0, dp(13), 0, dp(8))
         root.addView(status)
 
@@ -286,7 +452,11 @@ class MainActivity : Activity() {
         }
 
         scroll.addView(channelList)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        root.addView(
+            scroll,
+            LinearLayout.LayoutParams(-1, 0, 1f)
+        )
 
         // BOTTOM NAVIGATION
 
@@ -305,36 +475,58 @@ class MainActivity : Activity() {
         )
 
         navItems.forEachIndexed { index, title ->
-            val item = label(title, 12f, purpleLight, true).apply {
+
+            val item = label(
+                title,
+                12f,
+                purpleLight,
+                true
+            ).apply {
+
                 gravity = Gravity.CENTER
-                setPadding(dp(5), dp(5), dp(5), dp(5))
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+
+                setPadding(
+                    dp(5),
+                    dp(5),
+                    dp(5),
+                    dp(5)
+                )
+
+                layoutParams =
+                    LinearLayout.LayoutParams(0, -2, 1f)
 
                 setOnClickListener {
+
                     when (index) {
+
                         0 -> {
                             page = "home"
                             selectedCategory = "All"
                             renderCategories()
                             renderChannels()
                         }
+
                         1 -> {
                             page = "favorites"
                             renderChannels()
                         }
+
                         2 -> {
                             page = "history"
                             renderChannels()
                         }
+
                         3 -> showSettings()
                     }
                 }
             }
+
             bottom.addView(item)
         }
 
         val bottomParams = LinearLayout.LayoutParams(-1, -2)
         bottomParams.topMargin = dp(8)
+
         root.addView(bottom, bottomParams)
 
         outer.addView(root)
@@ -342,7 +534,11 @@ class MainActivity : Activity() {
         drawer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(28), dp(18), dp(20))
-            background = rounded(Color.rgb(18, 9, 35), 0, purple)
+            background = rounded(
+                Color.rgb(18, 9, 35),
+                0,
+                purple
+            )
             elevation = dp(20).toFloat()
             visibility = View.GONE
         }
@@ -360,20 +556,29 @@ class MainActivity : Activity() {
 
         setContentView(outer)
 
-        search.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(
-                s: CharSequence?, start: Int, count: Int, after: Int
-            ) {}
+        search.addTextChangedListener(
+            object : TextWatcher {
 
-            override fun onTextChanged(
-                s: CharSequence?, start: Int, before: Int, count: Int
-            ) {
-                query = s.toString()
-                renderChannels()
+                override fun beforeTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    count: Int,
+                    after: Int
+                ) {}
+
+                override fun onTextChanged(
+                    s: CharSequence?,
+                    start: Int,
+                    before: Int,
+                    count: Int
+                ) {
+                    query = s.toString()
+                    renderChannels()
+                }
+
+                override fun afterTextChanged(s: Editable?) {}
             }
-
-            override fun afterTextChanged(s: Editable?) {}
-        })
+        )
 
         renderCategories()
         renderChannels()
@@ -382,22 +587,31 @@ class MainActivity : Activity() {
     // VOICE SEARCH
 
     private fun startVoiceSearch() {
+
         try {
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            val intent = Intent(
+                RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+            )
+
             intent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
             )
+
             intent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE,
                 Locale.getDefault()
             )
+
             intent.putExtra(
                 RecognizerIntent.EXTRA_PROMPT,
                 "Say a channel name"
             )
+
             startActivityForResult(intent, 501)
+
         } catch (e: Exception) {
+
             Toast.makeText(
                 this,
                 "Voice search is not available",
@@ -415,11 +629,13 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
 
         if (requestCode == 501 && resultCode == RESULT_OK) {
+
             val results = data?.getStringArrayListExtra(
                 RecognizerIntent.EXTRA_RESULTS
             )
 
             val spoken = results?.firstOrNull().orEmpty()
+
             search.setText(spoken)
             search.setSelection(search.text.length)
         }
@@ -428,10 +644,16 @@ class MainActivity : Activity() {
     // DRAWER
 
     private fun showDrawer() {
+
         drawer.removeAllViews()
 
-        drawer.addView(label("ASHIKA", 25f, purpleLight, true))
-        drawer.addView(label("NEON PURPLE PREMIUM", 10f, muted, true))
+        drawer.addView(
+            label("ASHIKA", 25f, purpleLight, true)
+        )
+
+        drawer.addView(
+            label("NEON PURPLE PREMIUM", 10f, muted, true)
+        )
 
         addDrawerItem("🏠   Home") {
             page = "home"
@@ -474,12 +696,17 @@ class MainActivity : Activity() {
         }
 
         addDrawerItem("ℹ️   About") {
+
             AlertDialog.Builder(this)
                 .setTitle("Ashika Live TV")
                 .setMessage(
                     "Neon Purple Premium Edition\n" +
                     "Firebase + Multiple M3U Playlists\n" +
-                    "Channels: ${channels.size}"
+                    "Channels: ${channels.size}\n" +
+                    "Internet: ${
+                        if (isInternetAvailable()) "Online"
+                        else "Offline"
+                    }"
                 )
                 .setPositiveButton("OK", null)
                 .show()
@@ -492,8 +719,21 @@ class MainActivity : Activity() {
         text: String,
         action: () -> Unit
     ) {
-        val item = label(text, 15f, white, true).apply {
-            setPadding(dp(12), dp(17), dp(8), dp(17))
+
+        val item = label(
+            text,
+            15f,
+            white,
+            true
+        ).apply {
+
+            setPadding(
+                dp(12),
+                dp(17),
+                dp(8),
+                dp(17)
+            )
+
             setOnClickListener {
                 drawer.visibility = View.GONE
                 action()
@@ -513,14 +753,25 @@ class MainActivity : Activity() {
     // SETTINGS
 
     private fun showSettings() {
+
         AlertDialog.Builder(this)
             .setTitle("Ashika Premium Settings")
             .setMessage(
                 "Theme: Neon Purple\n" +
                 "Channels: ${channels.size}\n" +
                 "Favorites: ${favorites.size}\n" +
-                "PIN Lock: ${if (prefs.getBoolean("pin_enabled", false)) "ON" else "OFF"}\n\n" +
-                "Player and Picture-in-Picture settings will be configured in PlayerActivity."
+                "Internet: ${
+                    if (isInternetAvailable()) "ONLINE"
+                    else "OFFLINE"
+                }\n" +
+                "PIN Lock: ${
+                    if (prefs.getBoolean("pin_enabled", false))
+                        "ON"
+                    else
+                        "OFF"
+                }\n\n" +
+                "Player and Picture-in-Picture settings " +
+                "will be configured in PlayerActivity."
             )
             .setPositiveButton("PIN Settings") { _, _ ->
                 showPinSettings()
@@ -532,6 +783,7 @@ class MainActivity : Activity() {
     // PIN SETTINGS
 
     private fun showPinSettings() {
+
         val input = EditText(this).apply {
             hint = "Enter new 4-8 digit PIN"
             inputType = 2
@@ -540,20 +792,31 @@ class MainActivity : Activity() {
         }
 
         val box = LinearLayout(this).apply {
-            setPadding(dp(22), dp(10), dp(22), dp(5))
+            setPadding(
+                dp(22),
+                dp(10),
+                dp(22),
+                dp(5)
+            )
             addView(input)
         }
 
         val dialog = AlertDialog.Builder(this)
             .setTitle("Set App PIN")
-            .setMessage("Create a PIN for app lock and Admin Panel.")
+            .setMessage(
+                "Create a PIN for app lock and Admin Panel."
+            )
             .setView(box)
             .setPositiveButton("Save", null)
             .setNegativeButton("Cancel", null)
             .create()
 
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+
+            dialog.getButton(
+                AlertDialog.BUTTON_POSITIVE
+            ).setOnClickListener {
+
                 val pin = input.text.toString()
 
                 if (!pin.matches(Regex("\\d{4,8}"))) {
@@ -566,7 +829,12 @@ class MainActivity : Activity() {
                     .putBoolean("pin_enabled", true)
                     .apply()
 
-                Toast.makeText(this, "PIN lock enabled", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this,
+                    "PIN lock enabled",
+                    Toast.LENGTH_SHORT
+                ).show()
+
                 dialog.dismiss()
             }
         }
@@ -575,6 +843,7 @@ class MainActivity : Activity() {
     }
 
     private fun showAppLock() {
+
         val input = EditText(this).apply {
             hint = "Enter your PIN"
             inputType = 2
@@ -591,8 +860,14 @@ class MainActivity : Activity() {
             .create()
 
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val savedPin = prefs.getString("app_pin", "")
+
+            dialog.getButton(
+                AlertDialog.BUTTON_POSITIVE
+            ).setOnClickListener {
+
+                val savedPin =
+                    prefs.getString("app_pin", "")
+
                 if (input.text.toString() == savedPin) {
                     dialog.dismiss()
                 } else {
@@ -607,17 +882,22 @@ class MainActivity : Activity() {
     // ADMIN PANEL
 
     private fun showAdminPanel() {
+
         val savedPin = prefs.getString("app_pin", null)
 
         if (savedPin.isNullOrBlank()) {
+
             AlertDialog.Builder(this)
                 .setTitle("Admin Panel Locked")
-                .setMessage("Set an app PIN before opening the Admin Panel.")
+                .setMessage(
+                    "Set an app PIN before opening the Admin Panel."
+                )
                 .setPositiveButton("Set PIN") { _, _ ->
                     showPinSettings()
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
+
             return
         }
 
@@ -633,6 +913,7 @@ class MainActivity : Activity() {
             .setMessage("Enter your app PIN.")
             .setView(input)
             .setPositiveButton("Continue") { _, _ ->
+
                 if (input.text.toString() == savedPin) {
                     openAdminOptions()
                 } else {
@@ -648,6 +929,7 @@ class MainActivity : Activity() {
     }
 
     private fun openAdminOptions() {
+
         val options = arrayOf(
             "Add Channel",
             "Refresh Channels",
@@ -657,11 +939,17 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("ASHIKA ADMIN PANEL")
             .setItems(options) { _, which ->
+
                 when (which) {
+
                     0 -> addAdminChannel()
+
                     1 -> loadChannels()
+
                     2 -> AlertDialog.Builder(this)
-                        .setMessage("Total channels: ${channels.size}")
+                        .setMessage(
+                            "Total channels: ${channels.size}"
+                        )
                         .setPositiveButton("OK", null)
                         .show()
                 }
@@ -670,6 +958,7 @@ class MainActivity : Activity() {
     }
 
     private fun addAdminChannel() {
+
         val name = EditText(this).apply {
             hint = "Channel name"
             setTextColor(white)
@@ -687,7 +976,13 @@ class MainActivity : Activity() {
 
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(5), dp(20), dp(5))
+            setPadding(
+                dp(20),
+                dp(5),
+                dp(20),
+                dp(5)
+            )
+
             addView(name)
             addView(url)
             addView(category)
@@ -697,21 +992,32 @@ class MainActivity : Activity() {
             .setTitle("Add New Channel")
             .setView(box)
             .setPositiveButton("Save") { _, _ ->
-                val channelName = name.text.toString().trim()
-                val streamUrl = url.text.toString().trim()
+
+                val channelName =
+                    name.text.toString().trim()
+
+                val streamUrl =
+                    url.text.toString().trim()
+
                 val channelCategory =
-                    category.text.toString().trim().ifBlank { "Other" }
+                    category.text.toString()
+                        .trim()
+                        .ifBlank { "Other" }
 
                 if (
                     channelName.isBlank() ||
-                    !(streamUrl.startsWith("https://") ||
-                      streamUrl.startsWith("http://"))
+                    !(
+                        streamUrl.startsWith("https://") ||
+                        streamUrl.startsWith("http://")
+                    )
                 ) {
+
                     Toast.makeText(
                         this,
                         "Enter a channel name and valid HTTP(S) URL",
                         Toast.LENGTH_LONG
                     ).show()
+
                     return@setPositiveButton
                 }
 
@@ -726,6 +1032,7 @@ class MainActivity : Activity() {
                         )
                     )
                     .addOnSuccessListener {
+
                         Toast.makeText(
                             this,
                             "Channel added successfully",
@@ -733,6 +1040,7 @@ class MainActivity : Activity() {
                         ).show()
                     }
                     .addOnFailureListener {
+
                         Toast.makeText(
                             this,
                             "Firebase error: ${it.message}",
@@ -747,11 +1055,13 @@ class MainActivity : Activity() {
     // FIREBASE + PLAYLISTS
 
     private fun loadChannels() {
+
         channelsListener?.remove()
         playlistListener?.remove()
 
         channelsListener = null
         playlistListener = null
+
         playlistRequestId++
 
         status.text = "Connecting to Firebase..."
@@ -763,7 +1073,8 @@ class MainActivity : Activity() {
             .addSnapshotListener { snapshot, error ->
 
                 if (error != null) {
-                    status.text = "Firebase error: ${error.message}"
+                    status.text =
+                        "Firebase error: ${error.message}"
                     return@addSnapshotListener
                 }
 
@@ -772,12 +1083,19 @@ class MainActivity : Activity() {
                 manualChannels.clear()
 
                 snapshot.documents.forEach { doc ->
+
                     val name = doc.getString("name")
                     val url = doc.getString("url")
-                    val category = doc.getString("category") ?: "Other"
+                    val category =
+                        doc.getString("category") ?: "Other"
 
-                    if (!name.isNullOrBlank() && !url.isNullOrBlank()) {
-                        manualChannels.add(Triple(name, url, category))
+                    if (
+                        !name.isNullOrBlank() &&
+                        !url.isNullOrBlank()
+                    ) {
+                        manualChannels.add(
+                            Triple(name, url, category)
+                        )
                     }
                 }
 
@@ -789,36 +1107,56 @@ class MainActivity : Activity() {
             .addSnapshotListener { snapshot, error ->
 
                 if (error != null) {
-                    status.text = "Playlist settings error: ${error.message}"
+                    status.text =
+                        "Playlist settings error: ${error.message}"
                     return@addSnapshotListener
                 }
 
                 if (snapshot == null || !snapshot.exists()) {
+
                     playlistRequestId++
                     playlistChannels.clear()
                     updateCombinedChannels()
+
                     return@addSnapshotListener
                 }
 
-                val items = mutableListOf<Pair<String, String>>()
-                val saved = snapshot.get("playlists") as? List<*>
+                val items =
+                    mutableListOf<Pair<String, String>>()
+
+                val saved =
+                    snapshot.get("playlists") as? List<*>
 
                 if (saved != null) {
+
                     saved.forEach { item ->
+
                         val data = item as? Map<*, *>
                             ?: return@forEach
 
-                        val name = data["name"] as? String ?: "Playlist"
-                        val url = data["url"] as? String ?: ""
-                        val enabled = data["enabled"] == true
+                        val name =
+                            data["name"] as? String ?: "Playlist"
+
+                        val url =
+                            data["url"] as? String ?: ""
+
+                        val enabled =
+                            data["enabled"] == true
 
                         if (enabled && url.isNotBlank()) {
                             items.add(name to url)
                         }
                     }
+
                 } else {
-                    val oldUrl = snapshot.getString("url")?.trim().orEmpty()
-                    val enabled = snapshot.getBoolean("enabled") == true
+
+                    val oldUrl =
+                        snapshot.getString("url")
+                            ?.trim()
+                            .orEmpty()
+
+                    val enabled =
+                        snapshot.getBoolean("enabled") == true
 
                     if (enabled && oldUrl.isNotBlank()) {
                         items.add("Old Playlist" to oldUrl)
@@ -830,15 +1168,22 @@ class MainActivity : Activity() {
     }
 
     private fun updateCombinedChannels() {
-        val combined = mutableListOf<Triple<String, String, String>>()
+
+        val combined =
+            mutableListOf<Triple<String, String, String>>()
+
         val used = mutableSetOf<String>()
 
         manualChannels.forEach {
-            if (used.add(it.second)) combined.add(it)
+            if (used.add(it.second)) {
+                combined.add(it)
+            }
         }
 
         playlistChannels.forEach {
-            if (used.add(it.second)) combined.add(it)
+            if (used.add(it.second)) {
+                combined.add(it)
+            }
         }
 
         channels.clear()
@@ -846,12 +1191,16 @@ class MainActivity : Activity() {
 
         if (
             selectedCategory != "All" &&
-            channels.none { it.third == selectedCategory }
+            channels.none {
+                it.third == selectedCategory
+            }
         ) {
             selectedCategory = "All"
         }
 
-        status.text = "${channels.size} CHANNELS AVAILABLE"
+        status.text =
+            "${channels.size} CHANNELS AVAILABLE"
+
         renderCategories()
         renderChannels()
     }
@@ -859,12 +1208,16 @@ class MainActivity : Activity() {
     private fun downloadMultiplePlaylists(
         playlistItems: List<Pair<String, String>>
     ) {
+
         playlistRequestId++
+
         val requestId = playlistRequestId
 
         if (playlistItems.isEmpty()) {
+
             playlistChannels.clear()
             updateCombinedChannels()
+
             return
         }
 
@@ -874,19 +1227,25 @@ class MainActivity : Activity() {
         status.text = "Downloading playlists..."
 
         thread {
-            val all = mutableListOf<Triple<String, String, String>>()
+
+            val all =
+                mutableListOf<Triple<String, String, String>>()
+
             val errors = mutableListOf<String>()
 
             playlistItems.forEach { playlist ->
+
                 var connection: HttpURLConnection? = null
 
                 try {
+
                     connection = URL(playlist.second)
                         .openConnection() as HttpURLConnection
 
                     connection.connectTimeout = 15000
                     connection.readTimeout = 20000
                     connection.requestMethod = "GET"
+
                     connection.setRequestProperty(
                         "User-Agent",
                         "AshikaLiveTV/1.0"
@@ -895,7 +1254,9 @@ class MainActivity : Activity() {
                     connection.connect()
 
                     if (connection.responseCode !in 200..299) {
-                        throw Exception("HTTP ${connection.responseCode}")
+                        throw Exception(
+                            "HTTP ${connection.responseCode}"
+                        )
                     }
 
                     val content = connection.inputStream
@@ -905,38 +1266,53 @@ class MainActivity : Activity() {
                     val parsed = parseM3U(content)
 
                     parsed.forEach {
+
                         val cat = if (it.third == "Other") {
                             playlist.first
                         } else {
                             "${playlist.first} • ${it.third}"
                         }
 
-                        all.add(Triple(it.first, it.second, cat))
+                        all.add(
+                            Triple(it.first, it.second, cat)
+                        )
                     }
 
                     if (parsed.isEmpty()) {
-                        errors.add("${playlist.first}: Empty playlist")
+                        errors.add(
+                            "${playlist.first}: Empty playlist"
+                        )
                     }
 
                 } catch (e: Exception) {
-                    errors.add("${playlist.first}: ${e.message}")
+
+                    errors.add(
+                        "${playlist.first}: ${e.message}"
+                    )
+
                 } finally {
                     connection?.disconnect()
                 }
             }
 
             runOnUiThread {
-                if (isFinishing || requestId != playlistRequestId) {
+
+                if (
+                    isFinishing ||
+                    requestId != playlistRequestId
+                ) {
                     return@runOnUiThread
                 }
 
                 playlistChannels.clear()
                 playlistChannels.addAll(all)
+
                 updateCombinedChannels()
 
                 if (errors.isNotEmpty()) {
                     status.text =
-                        "${channels.size} CHANNELS | ${errors.size} PLAYLIST ERRORS"
+                        "${channels.size} CHANNELS | " +
+                        "${errors.size} PLAYLIST ERRORS"
                 }
             }
         }
@@ -946,21 +1322,27 @@ class MainActivity : Activity() {
         content: String
     ): List<Triple<String, String, String>> {
 
-        val result = mutableListOf<Triple<String, String, String>>()
+        val result =
+            mutableListOf<Triple<String, String, String>>()
+
         var currentName = ""
         var currentCategory = "Other"
 
         content.lineSequence().forEach { raw ->
+
             val line = raw.trim()
 
             if (line.isBlank()) return@forEach
 
             if (line.startsWith("#EXTINF", true)) {
+
                 val comma = line.lastIndexOf(',')
 
                 val displayName = if (comma >= 0) {
                     line.substring(comma + 1).trim()
-                } else ""
+                } else {
+                    ""
+                }
 
                 val tvgName = Regex(
                     """tvg-name\s*=\s*["']([^"']*)["']""",
@@ -972,22 +1354,32 @@ class MainActivity : Activity() {
                     RegexOption.IGNORE_CASE
                 ).find(line)?.groupValues?.get(1)
 
-                currentName = tvgName
-                    ?.takeIf { it.isNotBlank() }
-                    ?: displayName.ifBlank { "Unknown Channel" }
+                currentName =
+                    tvgName?.takeIf { it.isNotBlank() }
+                        ?: displayName.ifBlank {
+                            "Unknown Channel"
+                        }
 
-                currentCategory = group
-                    ?.takeIf { it.isNotBlank() }
-                    ?: "Other"
+                currentCategory =
+                    group?.takeIf { it.isNotBlank() }
+                        ?: "Other"
 
             } else if (
                 !line.startsWith("#") &&
-                (line.startsWith("http://", true) ||
-                 line.startsWith("https://", true))
+                (
+                    line.startsWith("http://", true) ||
+                    line.startsWith("https://", true)
+                )
             ) {
+
                 if (currentName.isNotBlank()) {
+
                     result.add(
-                        Triple(currentName, line, currentCategory)
+                        Triple(
+                            currentName,
+                            line,
+                            currentCategory
+                        )
                     )
                 }
 
@@ -1002,13 +1394,16 @@ class MainActivity : Activity() {
     // CATEGORIES
 
     private fun renderCategories() {
+
         categoryList.removeAllViews()
 
         val categories = listOf("All") +
             channels.map { it.third }.distinct().sorted()
 
         categories.forEach { category ->
-            val selected = selectedCategory == category
+
+            val selected =
+                selectedCategory == category
 
             val chip = label(
                 category,
@@ -1016,8 +1411,16 @@ class MainActivity : Activity() {
                 if (selected) white else muted,
                 true
             ).apply {
+
                 gravity = Gravity.CENTER
-                setPadding(dp(15), dp(10), dp(15), dp(10))
+
+                setPadding(
+                    dp(15),
+                    dp(10),
+                    dp(15),
+                    dp(10)
+                )
+
                 background = rounded(
                     if (selected) purple else panel,
                     20,
@@ -1025,15 +1428,20 @@ class MainActivity : Activity() {
                 )
 
                 setOnClickListener {
+
                     selectedCategory = category
                     page = "home"
+
                     renderCategories()
                     renderChannels()
                 }
             }
 
-            val params = LinearLayout.LayoutParams(-2, -2)
+            val params =
+                LinearLayout.LayoutParams(-2, -2)
+
             params.marginEnd = dp(8)
+
             categoryList.addView(chip, params)
         }
     }
@@ -1041,21 +1449,26 @@ class MainActivity : Activity() {
     // CHANNELS
 
     private fun renderChannels() {
+
         channelList.removeAllViews()
 
         val filtered = when (page) {
+
             "favorites" -> channels.filter {
                 favorites.contains(it.second)
             }
 
             "history" -> history.mapNotNull { url ->
-                channels.find { it.second == url }
+                channels.find {
+                    it.second == url
+                }
             }
 
             else -> channels.filter {
                 selectedCategory == "All" ||
                 it.third == selectedCategory
             }
+
         }.filter {
             it.first.contains(query, true)
         }
@@ -1065,16 +1478,24 @@ class MainActivity : Activity() {
         }
 
         if (filtered.isEmpty()) {
+
             channelList.addView(
                 label(
-                    if (page == "favorites") "♡  No favorites yet"
-                    else if (page == "history") "No recent channels"
-                    else "No channels found",
+                    when (page) {
+                        "favorites" -> "♡  No favorites yet"
+                        "history" -> "No recent channels"
+                        else -> "No channels found"
+                    },
                     14f,
                     muted
                 ).apply {
                     gravity = Gravity.CENTER
-                    setPadding(10, dp(35), 10, dp(35))
+                    setPadding(
+                        10,
+                        dp(35),
+                        10,
+                        dp(35)
+                    )
                 }
             )
         }
@@ -1089,8 +1510,19 @@ class MainActivity : Activity() {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), dp(13), dp(10), dp(13))
-            background = rounded(panel, 17, 0xFF57318A.toInt())
+
+            setPadding(
+                dp(13),
+                dp(13),
+                dp(10),
+                dp(13)
+            )
+
+            background = rounded(
+                panel,
+                17,
+                0xFF57318A.toInt()
+            )
         }
 
         val logo = TextView(this).apply {
@@ -1098,20 +1530,34 @@ class MainActivity : Activity() {
             textSize = 20f
             gravity = Gravity.CENTER
             setTextColor(white)
+
             background = rounded(
-                Color.rgb(85, 35, 145), 13, purpleLight
+                Color.rgb(85, 35, 145),
+                13,
+                purpleLight
             )
         }
 
-        card.addView(logo, LinearLayout.LayoutParams(dp(48), dp(48)))
+        card.addView(
+            logo,
+            LinearLayout.LayoutParams(
+                dp(48),
+                dp(48)
+            )
+        )
 
         val info = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), 0, dp(5), 0)
-            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+
+            layoutParams =
+                LinearLayout.LayoutParams(0, -2, 1f)
         }
 
-        info.addView(label(channel.first, 14f, white, true))
+        info.addView(
+            label(channel.first, 14f, white, true)
+        )
+
         info.addView(
             label(channel.third, 10f, muted).apply {
                 setPadding(0, dp(4), 0, 0)
@@ -1121,20 +1567,31 @@ class MainActivity : Activity() {
         card.addView(info)
 
         val favorite = label(
-            if (favorites.contains(channel.second)) "♥" else "♡",
+            if (favorites.contains(channel.second)) "♥"
+            else "♡",
             25f,
             red,
             true
         ).apply {
-            setPadding(dp(10), dp(8), dp(8), dp(8))
+
+            setPadding(
+                dp(10),
+                dp(8),
+                dp(8),
+                dp(8)
+            )
 
             setOnClickListener {
+
                 if (!favorites.add(channel.second)) {
                     favorites.remove(channel.second)
                 }
 
                 prefs.edit()
-                    .putStringSet("favorites", favorites.toSet())
+                    .putStringSet(
+                        "favorites",
+                        favorites.toSet()
+                    )
                     .apply()
 
                 renderChannels()
@@ -1144,6 +1601,7 @@ class MainActivity : Activity() {
         card.addView(favorite)
 
         card.setOnClickListener {
+
             history.remove(channel.second)
             history.add(0, channel.second)
 
@@ -1152,46 +1610,92 @@ class MainActivity : Activity() {
             }
 
             prefs.edit()
-                .putString("history", history.joinToString("\n"))
+                .putString(
+                    "history",
+                    history.joinToString("\n")
+                )
                 .apply()
 
-            val intent = Intent(this, PlayerActivity::class.java)
+            val intent = Intent(
+                this,
+                PlayerActivity::class.java
+            )
+
             intent.putExtra("url", channel.second)
             intent.putExtra("name", channel.first)
+
             startActivity(intent)
         }
 
-        val params = LinearLayout.LayoutParams(-1, -2)
+        val params =
+            LinearLayout.LayoutParams(-1, -2)
+
         params.bottomMargin = dp(10)
+
         card.layoutParams = params
 
         return card
     }
 
-    // BACK
+    // BACK BUTTON + EXIT CONFIRMATION
 
     @Deprecated("Legacy back callback")
     override fun onBackPressed() {
+
         if (drawer.visibility == View.VISIBLE) {
+
             drawer.visibility = View.GONE
+
         } else if (page != "home") {
+
             page = "home"
             selectedCategory = "All"
+
             renderCategories()
             renderChannels()
+
         } else {
-            super.onBackPressed()
+
+            AlertDialog.Builder(this)
+                .setTitle("Exit Ashika Live TV?")
+                .setMessage(
+                    "আপনি কি Ashika Live TV থেকে বের হতে চান?"
+                )
+                .setPositiveButton("Yes") { _, _ ->
+                    finish()
+                }
+                .setNegativeButton("No", null)
+                .setCancelable(true)
+                .show()
         }
     }
 
     // CLEANUP
 
     override fun onDestroy() {
+
         playlistRequestId++
+
         channelsListener?.remove()
         playlistListener?.remove()
+
         channelsListener = null
         playlistListener = null
+
+        if (networkCallbackRegistered) {
+            try {
+                connectivityManager?.unregisterNetworkCallback(
+                    networkCallback
+                )
+            } catch (e: Exception) {
+                // Callback already unregistered
+            }
+
+            networkCallbackRegistered = false
+        }
+
+        connectivityManager = null
+
         super.onDestroy()
     }
 }
