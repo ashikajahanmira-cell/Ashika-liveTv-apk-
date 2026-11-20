@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "613248373337",
+    "project_id": "ashika-live-tv",
+    "storage_bucket": "ashika-live-tv.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:613248373337:android:6d53859325a2995c47d748",
+        "android_client_info": {
+          "package_name": "com.ashika.livetv"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA-zvGneyrHNE_q66J7pTSgC2rudBWj-X8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
