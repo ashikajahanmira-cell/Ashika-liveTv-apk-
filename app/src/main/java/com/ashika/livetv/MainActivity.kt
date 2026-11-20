@@ -16,6 +16,11 @@ import android.content.Intent
 import android.content.SharedPreferences
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import java.net.HttpURLConnection
+import java.net.URL
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
 
@@ -37,14 +42,21 @@ class MainActivity : Activity() {
     private val channels =
         mutableListOf<Triple<String, String, String>>()
 
+    private val playlistChannels =
+        mutableListOf<Triple<String, String, String>>()
+
     private val favorites = mutableSetOf<String>()
     private val history = mutableListOf<String>()
 
     private var channelsListener: ListenerRegistration? = null
+    private var playlistListener: ListenerRegistration? = null
 
     private var selectedCategory = "All"
     private var page = "home"
     private var query = ""
+
+    private var lastPlaylistUrl = ""
+    private var playlistRequestId = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -191,7 +203,10 @@ class MainActivity : Activity() {
         )
 
         val refresh = label("↻ Refresh", 13f, 0xFF82B5FF.toInt(), true)
-        refresh.setOnClickListener { loadChannels() }
+        refresh.setOnClickListener {
+            lastPlaylistUrl = ""
+            loadChannels()
+        }
         section.addView(refresh)
 
         root.addView(section)
@@ -307,6 +322,7 @@ class MainActivity : Activity() {
         }
 
         addDrawerItem("🔄   Refresh Channels") {
+            lastPlaylistUrl = ""
             loadChannels()
         }
 
@@ -315,7 +331,7 @@ class MainActivity : Activity() {
                 .setTitle("Ashika Live TV Settings")
                 .setMessage(
                     "Premium Dark Theme\n" +
-                    "Source: Firebase Cloud\n" +
+                    "Source: Firebase + M3U Playlist\n" +
                     "Channels: ${channels.size}"
                 )
                 .setPositiveButton("OK", null)
@@ -357,17 +373,22 @@ class MainActivity : Activity() {
         )
     }
 
-    // FIREBASE AUTOMATIC LIVE SYNC
+    // FIREBASE CHANNELS + PLAYLIST
 
     private fun loadChannels() {
-
         channelsListener?.remove()
+        playlistListener?.remove()
+
         channelsListener = null
+        playlistListener = null
 
         status.text = "Connecting to Firebase..."
 
-        channelsListener = FirebaseFirestore.getInstance()
-            .collection("channels")
+        val db = FirebaseFirestore.getInstance()
+
+        // Individual channels from Admin Panel
+
+        channelsListener = db.collection("channels")
             .whereEqualTo("enabled", true)
             .addSnapshotListener { snapshot, error ->
 
@@ -388,27 +409,230 @@ class MainActivity : Activity() {
                     val category = doc.getString("category") ?: "Other"
 
                     if (!name.isNullOrBlank() && !url.isNullOrBlank()) {
-                        loaded.add(
-                            Triple(name, url, category)
-                        )
+                        loaded.add(Triple(name, url, category))
                     }
                 }
 
                 channels.clear()
                 channels.addAll(loaded)
 
-                if (
-                    selectedCategory != "All" &&
-                    channels.none { it.third == selectedCategory }
-                ) {
-                    selectedCategory = "All"
+                updateCombinedChannels()
+            }
+
+        // Playlist URL from Admin Panel
+
+        playlistListener = db.collection("settings")
+            .document("playlist")
+            .addSnapshotListener { snapshot, error ->
+
+                if (error != null) {
+                    status.text = "Playlist settings error: ${error.message}"
+                    return@addSnapshotListener
                 }
 
-                status.text = "${channels.size} CHANNELS AVAILABLE"
+                if (snapshot == null || !snapshot.exists()) {
+                    lastPlaylistUrl = ""
+                    playlistRequestId++
+                    playlistChannels.clear()
+                    updateCombinedChannels()
+                    return@addSnapshotListener
+                }
 
-                renderCategories()
-                renderChannels()
+                val enabled = snapshot.getBoolean("enabled") == true
+                val playlistUrl = snapshot.getString("url")?.trim().orEmpty()
+
+                if (!enabled || playlistUrl.isBlank()) {
+                    lastPlaylistUrl = ""
+                    playlistRequestId++
+                    playlistChannels.clear()
+                    updateCombinedChannels()
+                    return@addSnapshotListener
+                }
+
+                if (playlistUrl != lastPlaylistUrl) {
+                    lastPlaylistUrl = playlistUrl
+                    downloadPlaylist(playlistUrl)
+                }
             }
+    }
+
+    private fun updateCombinedChannels() {
+        val combined =
+            mutableListOf<Triple<String, String, String>>()
+
+        val usedUrls = mutableSetOf<String>()
+
+        // Manual Firebase channels first
+
+        channels.forEach { channel ->
+            if (usedUrls.add(channel.second)) {
+                combined.add(channel)
+            }
+        }
+
+        // Then M3U playlist channels
+
+        playlistChannels.forEach { channel ->
+            if (usedUrls.add(channel.second)) {
+                combined.add(channel)
+            }
+        }
+
+        val oldCategory = selectedCategory
+
+        channels.clear()
+        channels.addAll(combined)
+
+        if (
+            selectedCategory != "All" &&
+            channels.none { it.third == selectedCategory }
+        ) {
+            selectedCategory = "All"
+        }
+
+        status.text = "${channels.size} CHANNELS AVAILABLE"
+
+        renderCategories()
+        renderChannels()
+    }
+
+    // DOWNLOAD M3U PLAYLIST IN BACKGROUND
+
+    private fun downloadPlaylist(playlistUrl: String) {
+        playlistRequestId++
+        val requestId = playlistRequestId
+
+        status.text = "Downloading M3U playlist..."
+
+        thread {
+            var connection: HttpURLConnection? = null
+
+            try {
+                connection = URL(playlistUrl)
+                    .openConnection() as HttpURLConnection
+
+                connection.connectTimeout = 15000
+                connection.readTimeout = 20000
+                connection.requestMethod = "GET"
+                connection.setRequestProperty(
+                    "User-Agent",
+                    "AshikaLiveTV/1.0"
+                )
+
+                connection.connect()
+
+                val responseCode = connection.responseCode
+
+                if (responseCode !in 200..299) {
+                    throw Exception("HTTP error: $responseCode")
+                }
+
+                val content = BufferedReader(
+                    InputStreamReader(connection.inputStream, Charsets.UTF_8)
+                ).use { reader ->
+                    reader.readText()
+                }
+
+                val parsed = parseM3U(content)
+
+                runOnUiThread {
+                    if (isFinishing || requestId != playlistRequestId) {
+                        return@runOnUiThread
+                    }
+
+                    playlistChannels.clear()
+                    playlistChannels.addAll(parsed)
+
+                    updateCombinedChannels()
+
+                    status.text =
+                        "${channels.size} CHANNELS AVAILABLE | " +
+                        "${parsed.size} PLAYLIST CHANNELS"
+                }
+
+            } catch (e: Exception) {
+                runOnUiThread {
+                    if (isFinishing || requestId != playlistRequestId) {
+                        return@runOnUiThread
+                    }
+
+                    status.text =
+                        "Playlist error: ${e.message ?: "Download failed"}"
+                }
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+
+    // M3U PARSER
+
+    private fun parseM3U(
+        content: String
+    ): List<Triple<String, String, String>> {
+
+        val result = mutableListOf<Triple<String, String, String>>()
+
+        var currentName = ""
+        var currentCategory = "Other"
+
+        content.lineSequence().forEach { rawLine ->
+
+            val line = rawLine.trim()
+
+            if (line.isBlank()) return@forEach
+
+            if (line.startsWith("#EXTINF", ignoreCase = true)) {
+
+                val commaIndex = line.lastIndexOf(',')
+
+                val displayName = if (commaIndex >= 0) {
+                    line.substring(commaIndex + 1).trim()
+                } else {
+                    ""
+                }
+
+                val tvgName = Regex(
+                    """tvg-name\s*=\s*["']([^"']*)["']""",
+                    RegexOption.IGNORE_CASE
+                ).find(line)?.groupValues?.get(1)
+
+                val groupTitle = Regex(
+                    """group-title\s*=\s*["']([^"']*)["']""",
+                    RegexOption.IGNORE_CASE
+                ).find(line)?.groupValues?.get(1)
+
+                currentName = tvgName
+                    ?.takeIf { it.isNotBlank() }
+                    ?: displayName
+                    .ifBlank { "Unknown Channel" }
+
+                currentCategory = groupTitle
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "Other"
+
+            } else if (
+                !line.startsWith("#") &&
+                (line.startsWith("http://", true) ||
+                 line.startsWith("https://", true))
+            ) {
+
+                if (currentName.isNotBlank()) {
+                    result.add(
+                        Triple(
+                            currentName,
+                            line,
+                            currentCategory
+                        )
+                    )
+                }
+
+                currentName = ""
+                currentCategory = "Other"
+            }
+        }
+
+        return result
     }
 
     private fun renderCategories() {
@@ -598,8 +822,14 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        playlistRequestId++
+
         channelsListener?.remove()
+        playlistListener?.remove()
+
         channelsListener = null
+        playlistListener = null
+
         super.onDestroy()
     }
 }
