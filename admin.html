@@ -18,6 +18,7 @@ button.gray{background:#52627a}
 .small{color:#aebbd0;font-size:13px}
 #dashboard{display:none}
 #message,#playlistMessage{color:#42d9ff;margin:12px 0}
+.playlist{background:#202d43;padding:14px;border-radius:10px;margin:12px 0;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -36,9 +37,10 @@ button.gray{background:#52627a}
 <div id="dashboard">
 
 <div class="card">
-<h2>📡 M3U Playlist Manager</h2>
-<p class="small">এখানে সম্পূর্ণ M3U Playlist URL দিন। এটি আলাদা করে Firebase-এ সংরক্ষিত হবে।</p>
+<h2>📡 Multiple M3U Playlist Manager</h2>
+<p class="small">একাধিক Playlist যোগ, Edit, Delete এবং Enable/Disable করতে পারবে।</p>
 
+<input id="playlistName" placeholder="Playlist Name (e.g. Bangladesh TV)">
 <input id="playlistUrl" type="url" placeholder="https://example.com/playlist.m3u">
 
 <select id="playlistEnabled">
@@ -46,8 +48,11 @@ button.gray{background:#52627a}
 <option value="false">Playlist Disabled</option>
 </select>
 
-<button id="savePlaylistBtn">Save Playlist</button>
+<button id="addPlaylistBtn">➕ Add Playlist</button>
+<button class="gray" id="cancelPlaylistBtn" style="display:none">Cancel Edit</button>
+
 <p id="playlistMessage"></p>
+<div id="playlistList">Loading playlists...</div>
 </div>
 
 <div class="card">
@@ -97,13 +102,15 @@ firebase.initializeApp(firebaseConfig);
 
 const auth = firebase.auth();
 const db = firebase.firestore();
-
 const ADMIN_UID = "qVzYexoF4wcm7IBByOoA9yKeDy82";
 
 let editingId = null;
+let editingPlaylistId = null;
 let unsubscribe = null;
+let playlists = [];
 
 const $ = id => document.getElementById(id);
+const playlistDoc = db.collection("settings").doc("playlist");
 
 $("loginBtn").onclick = async () => {
   $("loginMessage").textContent = "Logging in...";
@@ -123,7 +130,7 @@ auth.onAuthStateChanged(async user => {
     $("dashboard").style.display = "block";
     $("loginMessage").textContent = "";
     loadChannels();
-    loadPlaylist();
+    loadPlaylists();
   } else {
     if (user) await auth.signOut();
 
@@ -140,6 +147,195 @@ auth.onAuthStateChanged(async user => {
     }
   }
 });
+
+/* MULTIPLE PLAYLIST MANAGER */
+
+async function loadPlaylists() {
+  $("playlistMessage").textContent = "Loading playlists...";
+
+  try {
+    const doc = await playlistDoc.get();
+
+    if (doc.exists) {
+      const data = doc.data();
+
+      // পুরোনো single playlist থাকলে সেটিও তালিকায় আনা হবে
+      if (Array.isArray(data.playlists)) {
+        playlists = data.playlists;
+      } else if (data.url) {
+        playlists = [{
+          id: "old_playlist",
+          name: "Old Playlist",
+          url: data.url,
+          enabled: data.enabled === true
+        }];
+      } else {
+        playlists = [];
+      }
+    } else {
+      playlists = [];
+    }
+
+    renderPlaylists();
+    $("playlistMessage").textContent =
+      playlists.length + " playlist loaded.";
+  } catch (error) {
+    $("playlistMessage").textContent = "Error: " + error.message;
+  }
+}
+
+function renderPlaylists() {
+  const list = $("playlistList");
+  list.replaceChildren();
+
+  if (playlists.length === 0) {
+    list.textContent = "No playlists added yet.";
+    return;
+  }
+
+  playlists.forEach(item => {
+    const card = document.createElement("div");
+    card.className = "playlist";
+
+    const title = document.createElement("h3");
+    title.textContent = item.name || "Unnamed Playlist";
+
+    const status = document.createElement("p");
+    status.className = "small";
+    status.textContent = item.enabled
+      ? "🟢 Enabled"
+      : "🔴 Disabled";
+
+    const url = document.createElement("p");
+    url.className = "small";
+    url.textContent = item.url || "";
+
+    const edit = document.createElement("button");
+    edit.textContent = "✏️ Edit";
+    edit.onclick = () => editPlaylist(item.id);
+
+    const toggle = document.createElement("button");
+    toggle.className = "gray";
+    toggle.textContent = item.enabled ? "Disable" : "Enable";
+    toggle.onclick = () => togglePlaylist(item.id);
+
+    const del = document.createElement("button");
+    del.className = "danger";
+    del.textContent = "Delete";
+    del.onclick = () => deletePlaylist(item.id);
+
+    card.append(title, status, url, edit, toggle, del);
+    list.appendChild(card);
+  });
+}
+
+async function savePlaylists() {
+  $("playlistMessage").textContent = "Saving playlists...";
+
+  try {
+    await playlistDoc.set({
+      playlists: playlists,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    renderPlaylists();
+    $("playlistMessage").textContent =
+      "✅ Playlists saved successfully!";
+  } catch (error) {
+    $("playlistMessage").textContent = "Error: " + error.message;
+  }
+}
+
+$("addPlaylistBtn").onclick = async () => {
+  const name = $("playlistName").value.trim();
+  const url = $("playlistUrl").value.trim();
+  const enabled = $("playlistEnabled").value === "true";
+
+  if (!name || !url) {
+    $("playlistMessage").textContent =
+      "Enter playlist name and URL.";
+    return;
+  }
+
+  try {
+    const parsed = new URL(url);
+
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("Only HTTP or HTTPS URLs are allowed.");
+    }
+
+    if (editingPlaylistId) {
+      const index = playlists.findIndex(
+        item => item.id === editingPlaylistId
+      );
+
+      if (index !== -1) {
+        playlists[index] = {
+          ...playlists[index],
+          name,
+          url,
+          enabled
+        };
+      }
+    } else {
+      playlists.push({
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+        name,
+        url,
+        enabled
+      });
+    }
+
+    await savePlaylists();
+    clearPlaylistForm();
+
+  } catch (error) {
+    $("playlistMessage").textContent = "Error: " + error.message;
+  }
+};
+
+function editPlaylist(id) {
+  const item = playlists.find(p => p.id === id);
+  if (!item) return;
+
+  editingPlaylistId = id;
+  $("playlistName").value = item.name || "";
+  $("playlistUrl").value = item.url || "";
+  $("playlistEnabled").value = String(item.enabled === true);
+  $("addPlaylistBtn").textContent = "Update Playlist";
+  $("cancelPlaylistBtn").style.display = "inline-block";
+  $("playlistMessage").textContent = "Editing: " + item.name;
+
+  window.scrollTo({top: 0, behavior: "smooth"});
+}
+
+async function togglePlaylist(id) {
+  const item = playlists.find(p => p.id === id);
+  if (!item) return;
+
+  item.enabled = !item.enabled;
+  await savePlaylists();
+}
+
+async function deletePlaylist(id) {
+  if (!confirm("Delete this playlist?")) return;
+
+  playlists = playlists.filter(p => p.id !== id);
+  await savePlaylists();
+
+  if (editingPlaylistId === id) clearPlaylistForm();
+}
+
+function clearPlaylistForm() {
+  editingPlaylistId = null;
+  $("playlistName").value = "";
+  $("playlistUrl").value = "";
+  $("playlistEnabled").value = "true";
+  $("addPlaylistBtn").textContent = "➕ Add Playlist";
+  $("cancelPlaylistBtn").style.display = "none";
+}
+
+$("cancelPlaylistBtn").onclick = clearPlaylistForm;
 
 /* CHANNEL MANAGER */
 
@@ -274,60 +470,7 @@ function clearForm() {
 }
 
 $("cancelBtn").onclick = clearForm;
-
-/* PLAYLIST MANAGER */
-
-async function loadPlaylist() {
-  $("playlistMessage").textContent = "Loading playlist settings...";
-
-  try {
-    const doc = await db.collection("settings").doc("playlist").get();
-
-    if (doc.exists) {
-      const data = doc.data();
-      $("playlistUrl").value = data.url || "";
-      $("playlistEnabled").value = String(data.enabled === true);
-      $("playlistMessage").textContent = "Playlist settings loaded.";
-    } else {
-      $("playlistMessage").textContent = "No playlist saved yet.";
-    }
-  } catch (error) {
-    $("playlistMessage").textContent = "Error: " + error.message;
-  }
-}
-
-$("savePlaylistBtn").onclick = async () => {
-  const url = $("playlistUrl").value.trim();
-  const enabled = $("playlistEnabled").value === "true";
-
-  if (!url) {
-    $("playlistMessage").textContent = "Enter a playlist URL.";
-    return;
-  }
-
-  try {
-    new URL(url);
-
-    if (!["http:", "https:"].includes(new URL(url).protocol)) {
-      throw new Error("Only HTTP or HTTPS URLs are allowed.");
-    }
-
-    $("playlistMessage").textContent = "Saving playlist...";
-
-    await db.collection("settings").doc("playlist").set({
-      url,
-      enabled,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-
-    $("playlistMessage").textContent =
-      "✅ Playlist URL saved successfully!";
-  } catch (error) {
-    $("playlistMessage").textContent = "Error: " + error.message;
-  }
-};
-
 $("logoutBtn").onclick = () => auth.signOut();
 </script>
 </body>
-</html>
+  </html>
