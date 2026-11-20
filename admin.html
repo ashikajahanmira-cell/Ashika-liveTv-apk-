@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ashika Live TV - Admin</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080d19;color:#fff;font-family:Arial,sans-serif;padding:20px}
+.container{max-width:850px;margin:auto}
+h1{color:#42d9ff}
+.card{background:#141e30;padding:20px;border-radius:14px;margin:18px 0}
+input,select{width:100%;padding:13px;margin:8px 0;background:#0b1424;color:white;border:1px solid #34445f;border-radius:8px}
+button{padding:11px 16px;border:0;border-radius:8px;background:#08a9dc;color:white;font-weight:bold;margin:5px;cursor:pointer}
+button.danger{background:#d83d52}
+button.gray{background:#52627a}
+.channel{background:#202d43;padding:14px;border-radius:10px;margin:12px 0;overflow-wrap:anywhere}
+.small{color:#aebbd0;font-size:13px}
+#dashboard{display:none}
+#message{color:#42d9ff;margin:12px 0}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>📺 Ashika Live TV</h1>
+<p class="small">Admin Control Panel</p>
+
+<div class="card" id="login">
+<h2>Admin Login</h2>
+<input id="email" type="email" placeholder="Admin Email">
+<input id="password" type="password" placeholder="Admin Password">
+<button id="loginBtn">Login</button>
+<p id="loginMessage"></p>
+</div>
+
+<div id="dashboard">
+<div class="card">
+<h2>➕ Add / Edit Channel</h2>
+<input id="channelName" placeholder="Channel Name">
+<input id="channelUrl" placeholder="Stream URL (m3u8)">
+<select id="category">
+<option>Entertainment</option>
+<option>Sports</option>
+<option>News</option>
+<option>Islamic</option>
+</select>
+<select id="enabled">
+<option value="true">Enabled</option>
+<option value="false">Disabled</option>
+</select>
+<button id="saveBtn">Save Channel</button>
+<button class="gray" id="cancelBtn" style="display:none">Cancel Edit</button>
+<p id="message"></p>
+</div>
+
+<div class="card">
+<h2>📡 All Channels</h2>
+<div id="channelList">Loading...</div>
+</div>
+<button class="danger" id="logoutBtn">Logout</button>
+</div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyAJ-xotAUJ3gAp6kkDlFAEoYpcvc59snYA",
+  authDomain: "ashika-live-tv.firebaseapp.com",
+  projectId: "ashika-live-tv",
+  storageBucket: "ashika-live-tv.firebasestorage.app",
+  messagingSenderId: "613248373337",
+  appId: "1:613248373337:web:879d0e205779789447d748",
+  measurementId: "G-M4SXNHKPFP"
+};
+
+firebase.initializeApp(firebaseConfig);
+
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+const ADMIN_UID = "qVzYexoF4wcm7IBByOoA9yKeDy82";
+
+let editingId = null;
+let unsubscribe = null;
+
+const $ = id => document.getElementById(id);
+
+$("loginBtn").onclick = async () => {
+  $("loginMessage").textContent = "Logging in...";
+  try {
+    await auth.signInWithEmailAndPassword(
+      $("email").value.trim(),
+      $("password").value
+    );
+  } catch (error) {
+    $("loginMessage").textContent = error.message;
+  }
+};
+
+auth.onAuthStateChanged(async user => {
+  if (user && user.uid === ADMIN_UID) {
+    $("login").style.display = "none";
+    $("dashboard").style.display = "block";
+    $("loginMessage").textContent = "";
+    loadChannels();
+  } else {
+    if (user) await auth.signOut();
+    $("login").style.display = "block";
+    $("dashboard").style.display = "none";
+    if (user) $("loginMessage").textContent = "This account is not an admin.";
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
+  }
+});
+
+function loadChannels() {
+  if (unsubscribe) unsubscribe();
+
+  unsubscribe = db.collection("channels")
+    .orderBy("name")
+    .onSnapshot(snapshot => {
+      const list = $("channelList");
+      list.replaceChildren();
+
+      if (snapshot.empty) {
+        list.textContent = "No channels added yet.";
+        return;
+      }
+
+      snapshot.forEach(doc => {
+        const data = doc.data();
+
+        const card = document.createElement("div");
+        card.className = "channel";
+
+        const title = document.createElement("h3");
+        title.textContent = data.name || "Unnamed Channel";
+
+        const info = document.createElement("p");
+        info.className = "small";
+        info.textContent =
+          (data.category || "Other") + " | " +
+          (data.enabled ? "🟢 Enabled" : "🔴 Disabled");
+
+        const url = document.createElement("p");
+        url.className = "small";
+        url.textContent = data.url || "";
+
+        const edit = document.createElement("button");
+        edit.textContent = "✏️ Edit";
+        edit.onclick = () => editChannel(doc.id, data);
+
+        const toggle = document.createElement("button");
+        toggle.className = "gray";
+        toggle.textContent = data.enabled ? "Disable" : "Enable";
+        toggle.onclick = () => toggleChannel(doc.id, data.enabled);
+
+        const del = document.createElement("button");
+        del.className = "danger";
+        del.textContent = "Delete";
+        del.onclick = () => deleteChannel(doc.id);
+
+        card.append(title, info, url, edit, toggle, del);
+        list.appendChild(card);
+      });
+    }, error => {
+      $("channelList").textContent = "Error: " + error.message;
+    });
+}
+
+$("saveBtn").onclick = async () => {
+  const name = $("channelName").value.trim();
+  const url = $("channelUrl").value.trim();
+
+  if (!name || !url) {
+    $("message").textContent = "Enter channel name and URL.";
+    return;
+  }
+
+  try {
+    new URL(url);
+    $("message").textContent = "Saving...";
+
+    const channel = {
+      name,
+      url,
+      category: $("category").value,
+      enabled: $("enabled").value === "true"
+    };
+
+    if (editingId) {
+      await db.collection("channels").doc(editingId).update(channel);
+    } else {
+      await db.collection("channels").add(channel);
+    }
+
+    clearForm();
+    $("message").textContent = "✅ Channel saved successfully!";
+  } catch (error) {
+    $("message").textContent = "Error: " + error.message;
+  }
+};
+
+function editChannel(id, data) {
+  editingId = id;
+  $("channelName").value = data.name || "";
+  $("channelUrl").value = data.url || "";
+  $("category").value = data.category || "Entertainment";
+  $("enabled").value = String(data.enabled === true);
+  $("saveBtn").textContent = "Update Channel";
+  $("cancelBtn").style.display = "inline-block";
+  $("message").textContent = "Editing: " + (data.name || "");
+  window.scrollTo({top: 0, behavior: "smooth"});
+}
+
+async function toggleChannel(id, current) {
+  try {
+    await db.collection("channels").doc(id).update({
+      enabled: !current
+    });
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function deleteChannel(id) {
+  if (!confirm("Are you sure you want to delete this channel?")) return;
+
+  try {
+    await db.collection("channels").doc(id).delete();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+function clearForm() {
+  editingId = null;
+  $("channelName").value = "";
+  $("channelUrl").value = "";
+  $("category").value = "Entertainment";
+  $("enabled").value = "true";
+  $("saveBtn").textContent = "Save Channel";
+  $("cancelBtn").style.display = "none";
+}
+
+$("cancelBtn").onclick = clearForm;
+
+$("logoutBtn").onclick = () => auth.signOut();
+</script>
+</body>
+  </html>
